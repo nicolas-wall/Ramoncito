@@ -42,6 +42,10 @@ public:
     // Fuerza el inicio del portal manualmente.
     void startPortal();
 
+    // Para el menú de estado:
+    bool hasCredentials() const { return _ssid.length() > 0; }
+    const char* ssidGuardado() const { return _ssid.c_str(); }
+
 private:
     // ----- Estado interno -----------------------------------------
     // Nota: el portal puede seguir activo DURANTE SINCRONIZANDO_NTP

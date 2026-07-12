@@ -257,6 +257,7 @@ No empezar hasta completar Etapa 8. Estas funcionalidades requieren Etapas 0-8 e
   - Oleadas de sprites enemigos 8x8
   - Botón A = moverse, botón B = disparar (o tap touch)
   - Dificultad incremental por nivel
+- [ ] **NFC** — lector PN532 por I2C (mismo bus del OLED, ~USD 4) o tags NTAG21x baratos: acercarle "objetos" físicos que el toy reconoce (comida de juguete, un corazón impreso en 3D con tag adentro) y reacciona distinto según cuál sea
 - [ ] **Control por Bluetooth (BLE)** — el ESP32-S3 lo trae integrado; app o página Web Bluetooth (Chrome/Edge en Android y desktop) sin nada que instalar:
   - [ ] Servicio BLE con característica de estado: ver en vivo felicidad/energía/aburrimiento desde el teléfono ("¿cómo está?")
   - [ ] Interacción remota: mandarle un mimo, un mensaje o despertarlo desde el teléfono

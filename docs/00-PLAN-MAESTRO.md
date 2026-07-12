@@ -32,12 +32,12 @@ Orden de lectura para construir: 5 (qué sigue) → el doc de la etapa en curso.
 | Librería gráfica | U8g2, constructor `U8G2_SSD1309_128X64_NONAME0_F_HW_I2C` |
 | Entorno | **PlatformIO** + framework Arduino, board `seeed_xiao_esp32s3` |
 | Personalidad | **Tipo Tamagotchi**: felicidad/energía/aburrimiento (0-100) con decaimiento, persistidas en NVS. **Decaimiento offline**: al reencender aplica el tiempo que estuvo apagado (tope 48 h) — te "extraña" si lo abandonás |
-| Entradas | 2 botones (D0/D1) + **touch capacitivo** (D2, cable/cinta de cobre a través del cuerpo 3D) |
+| Entradas | 2 botones (D0/D1) + **touch capacitivo** (D2, cable/cinta de cobre a través del cuerpo 3D). **Roles (decidido en uso real)**: la caricia es LA interacción afectiva; los botones son utilitarios — cualquiera abre el **menú de estado** (hora, WiFi, barras de humor) y el combo A+B 3 s queda reservado para el juego oculto |
 | Sonido | **Buzzer pasivo** en D3 vía PWM LEDC (único componente a comprar, ~USD 1) |
 | Conectividad | WiFi **solo para NTP** al boot → ciclo día/noche (22:00–07:00 duerme). Configuración **desde el teléfono** vía portal cautivo (el toy levanta su propia red "espToy-setup"); el portal también permite tomar la hora del navegador del teléfono, sin internet |
 | Minijuego | **Pong** vs CPU, oculto tras combo A+B 3 s; la mascota "es" la CPU y reacciona al resultado |
 | Estética | Ojos robot procedurales (estilo RoboEyes/Emo), sin bitmaps, interpolación entre expresiones |
-| Diferido a v2 | IMU MPU6050, Space Invaders, batería LiPo, expresiones extra, **BLE**: ver estado desde el teléfono, interacción remota y editor de caras (subir expresiones nuevas como parámetros, guardadas en NVS) |
+| Diferido a v2 | IMU MPU6050, Space Invaders, batería LiPo, expresiones extra, **NFC** (lector PN532 I2C o tags NTAG: objetos físicos que el toy "reconoce"), **BLE**: ver estado desde el teléfono, interacción remota y editor de caras (subir expresiones nuevas como parámetros, guardadas en NVS) |
 
 Pinout completo y justificado: doc 01 §3. Resumen: botones D0/D1, touch D2, buzzer D3, OLED D4 (SDA) / D5 (SCL).
 

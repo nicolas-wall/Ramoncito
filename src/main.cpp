@@ -21,13 +21,17 @@
 #include "sound.h"
 #include "mood.h"
 #include "net.h"
+#include "menu.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 // ----- Máquina de estados global ------------------------------
-enum class AppState : uint8_t { IDLE, REACTING, SLEEPING };
+enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU };
 static AppState appState = AppState::IDLE;
+
+static uint32_t menuHasta = 0;                 // auto-cierre del menú
+static const uint32_t MENU_TIMEOUT_MS = 10000;
 
 static uint32_t    reaccionHasta   = 0;
 static const char* reaccionLabel   = "";
@@ -95,22 +99,31 @@ static void despacharEventos() {
             continue;  // el touch no lo despierta (caricia mientras duerme, ok)
         }
 
+        // En el menú: cualquier botón lo cierra
+        if (appState == AppState::MENU) {
+            if (ev == InputEvent::BTN_A_PRESS || ev == InputEvent::BTN_B_PRESS) {
+                appState = AppState::IDLE;
+                idleExprActual = mood.dominantExpression();
+                face.setExpression(idleExprActual);
+                sound.play(Melody::BIP);
+            }
+            continue;  // touch ignorado dentro del menú
+        }
+
         switch (ev) {
+            // Botones = utilitarios: abren el menú de estado.
+            // (La interacción afectiva es la caricia; combo A+B queda
+            //  reservado para el juego oculto.)
             case InputEvent::BTN_A_PRESS:
-                mood.apply(MoodEffect::BTN_A);
-                sound.play(Melody::SORPRESA);
-                reaccionar(Expression::SORPRENDIDO, REACCION_BTN_MS, "BTN A (D0/GPIO1)");
-                break;
             case InputEvent::BTN_B_PRESS:
-                mood.apply(MoodEffect::BTN_B);
-                sound.play(Melody::FELIZ);
-                // Guiño: distinguible aunque el idle ya sea FELIZ
-                reaccionar(Expression::GUINO, REACCION_BTN_MS, "BTN B (D1/GPIO2)");
+                appState  = AppState::MENU;
+                menuHasta = millis() + MENU_TIMEOUT_MS;
+                sound.play(Melody::BIP);
                 break;
             case InputEvent::TOUCH_START:
                 mood.apply(MoodEffect::CARICIA);
                 sound.play(Melody::AMOR);
-                reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "CARICIA (D2/GPIO3)", true);
+                reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", true);
                 break;
             default:
                 break;
@@ -146,6 +159,16 @@ static void procesarComando(const char* cmd) {
         Serial.println("[cmd] portal forzado");
     } else if (cmd[0] == 'i') {
         imprimirEstado();
+    } else if (cmd[0] == 'n') {
+        // Alternar menú (equivale a apretar un botón)
+        if (appState == AppState::MENU) {
+            appState = AppState::IDLE;
+            face.setExpression(mood.dominantExpression());
+        } else {
+            appState  = AppState::MENU;
+            menuHasta = millis() + MENU_TIMEOUT_MS;
+        }
+        Serial.printf("[cmd] menu: %d\n", appState == AppState::MENU);
     }
 }
 
@@ -228,6 +251,13 @@ void loop() {
 
     despacharEventos();
 
+    // Auto-cierre del menú
+    if (appState == AppState::MENU && (int32_t)(ahora - menuHasta) >= 0) {
+        appState = AppState::IDLE;
+        idleExprActual = mood.dominantExpression();
+        face.setExpression(idleExprActual);
+    }
+
     // Transiciones dependientes de la hora
     bool esNoche = net.isNight();
     if (appState == AppState::IDLE && esNoche)       entrarADormir(ahora);
@@ -270,14 +300,32 @@ void loop() {
 
     // Render
     u8g2.clearBuffer();
-    face.render(u8g2);
-    if (appState == AppState::REACTING && reaccionLabel[0] != '\0') {
-        u8g2.setFont(u8g2_font_5x7_tf);
-        u8g2.drawStr(2, 63, reaccionLabel);
-    }
-    if (net.portalActive()) {
-        u8g2.setFont(u8g2_font_4x6_tf);
-        u8g2.drawStr(2, 6, "WiFi: espToy-setup");
+    if (appState == AppState::MENU) {
+        MenuData md;
+        md.felicidad       = mood.happiness();
+        md.energia         = mood.energy();
+        md.aburrimiento    = mood.boredom();
+        md.horaValida      = net.timeValid();
+        md.hora = md.minuto = 0;
+        if (md.horaValida) {
+            struct tm ti;
+            if (getLocalTime(&ti, 10)) { md.hora = ti.tm_hour; md.minuto = ti.tm_min; }
+        }
+        md.wifiConfigurada = net.hasCredentials();
+        md.ssid            = net.ssidGuardado();
+        md.portalActivo    = net.portalActive();
+        md.fwVersion       = FW_VERSION;
+        menuRender(u8g2, md);
+    } else {
+        face.render(u8g2);
+        if (appState == AppState::REACTING && reaccionLabel[0] != '\0') {
+            u8g2.setFont(u8g2_font_5x7_tf);
+            u8g2.drawStr(2, 63, reaccionLabel);
+        }
+        if (net.portalActive()) {
+            u8g2.setFont(u8g2_font_4x6_tf);
+            u8g2.drawStr(2, 6, "WiFi: espToy-setup");
+        }
     }
     u8g2.sendBuffer();
 
