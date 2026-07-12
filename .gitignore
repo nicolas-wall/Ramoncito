@@ -1,0 +1,23 @@
+# PlatformIO — directorio de build y caché
+.pio/
+
+# VS Code — configuración local del editor
+.vscode/
+
+# Secretos — nunca commitear credenciales
+include/secrets.h
+
+# Archivos de respaldo del editor
+*.bak
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Archivos de configuración locales de PlatformIO
+.pioenvs/
+.clang_complete
+.gcc-flags.json
