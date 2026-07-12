@@ -90,7 +90,7 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
   - [x] Botón B (D1/GPIO2) → `FELIZ` 1.5 s
   - [x] Touch (D2/GPIO3) → `AMOR` mientras dure la caricia (mín. 2 s)
 - [x] Loguear cada evento por serial para verificar detección
-- [ ] Verificar que no hay doble-disparo ni pérdida de eventos bajo pulsación rápida — **pendiente: prueba física del usuario**
+- [x] Verificar que no hay doble-disparo ni pérdida de eventos bajo pulsación rápida — confirmado por el usuario, botones identificados
 
 **Sabés que está lista cuando:** cada entrada dispara su reacción de forma confiable en 10 pruebas consecutivas sin falsos positivos ni rebotes.
 
@@ -104,18 +104,13 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Configurar LEDC en GPIO4: canal 0, resolución 8 bits
-- [ ] Implementar función `tone(freq, durationMs)` usando `ledcWriteTone` y timer no bloqueante
-- [ ] Implementar función `noTone()` para cortar el sonido
-- [ ] Definir tabla de sonidos por evento:
-  - [ ] Boot: secuencia ascendente corta (do-mi-sol)
-  - [ ] Botón A: bip agudo corto
-  - [ ] Botón B: bip medio doble
-  - [ ] Touch/caricia: trino suave (modulación rápida)
-  - [ ] Feliz: melodía de 3 notas ascendentes
-  - [ ] Triste: nota descendente lenta
-- [ ] Verificar que el sonido es no bloqueante (no interrumpe la animación)
-- [ ] Agregar flag global `bool soundEnabled = true` para mute fácil
+- [x] Configurar LEDC en GPIO4: canal 0, resolución 8 bits — `src/sound.cpp`
+- [x] Implementar reproducción no bloqueante con `ledcWriteTone` (melodías como arrays {hz,ms})
+- [x] Implementar `stop()` para cortar el sonido
+- [x] Definir tabla de sonidos por evento — 10 melodías: BOOT, FELIZ, TRISTE, ENOJADO, AMOR, SORPRESA, DORMIR, DESPERTAR, RONQUIDO, BIP
+- [x] Verificar que el sonido es no bloqueante (31 fps constantes con play() activo)
+- [x] Flag de mute: `sound.setEnabled()` + comando serial `s`
+- [ ] **Prueba auditiva pendiente**: conectar el buzzer pasivo (D3/GPIO4 + GND) — el código ya lo ejercita, solo falta escucharlo
 
 **Sabés que está lista cuando:** cada evento produce su sonido distintivo sin interrumpir la animación en pantalla. Si el buzzer no está disponible, setear `soundEnabled = false` y avanzar.
 
@@ -129,25 +124,16 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Definir struct `MoodState` con tres variables `uint8_t` (0-100):
-  - `happiness` — felicidad general
-  - `energy` — energía/hambre
-  - `boredom` — aburrimiento
-- [ ] Implementar decaimiento temporal con timer (cada 60 s en producción, configurable a 5 s para pruebas):
-  - `energy` baja 2 pts/min
-  - `happiness` baja 1 pt/min (más rápido si `boredom` > 70)
-  - `boredom` sube 3 pts/min si no hay interacción
-- [ ] Mapear entradas a modificaciones de humor:
-  - Botón A: `+10 happiness`, `-5 boredom`
-  - Botón B: `+15 energy`, `-10 boredom`
-  - Touch: `+20 happiness`, `-15 boredom`
-- [ ] Implementar función `moodToExpression()` que elige la expresión idle según la tabla de prioridad del doc 03 §5 (dormido / triste / enojado / aburrido / feliz / neutral)
-- [ ] Inicializar NVS con `Preferences` de Arduino ESP32
-- [ ] Guardar `MoodState` en NVS: timer de 5 min con dirty flag + guardado inmediato tras interacciones importantes (caricia, partida de Pong)
-- [ ] Guardar `lastSavedEpoch` (hora del último guardado) junto al `MoodState`
-- [ ] Cargar desde NVS al boot; si no existe, inicializar con valores default (50/80/0)
-- [ ] **Decaimiento offline**: al boot con hora válida, calcular el tiempo apagado y aplicar el decaimiento equivalente, con tope de 48 h (si no hay hora válida, omitir — el apagado actúa como pausa). *Nota: requiere la hora de Etapa 6; dejar la función lista con guarda y activarla al completar esa etapa.*
-- [ ] Loguear estado de humor por serial en cada cambio
+- [x] Definir estado de humor: happiness/energy/boredom `uint8_t` 0-100 — `src/mood.cpp`
+- [x] Implementar decaimiento temporal (verificado en hardware: -2 energía, -1/-2 felicidad, +3 aburrimiento por minuto; TIME_SCALE en config.h para acelerar pruebas)
+- [x] Mapear entradas a modificaciones de humor (A: +10F -5A; B: +15E -10A; caricia: +20F -15A; + efectos de Pong y despertar nocturno ya definidos)
+- [x] `dominantExpression()` según tabla doc 03 §5 (con orden corregido: la condición compuesta ENOJADO se evalúa antes que TRISTE)
+- [x] NVS con `Preferences` (namespace "esptoy")
+- [x] Guardar: timer 5 min con dirty flag + inmediato tras interacciones
+- [x] Guardar `lastEpoch` junto al estado
+- [x] Cargar al boot con defaults 50/80/0 — **verificado: el humor sobrevive al reinicio**
+- [x] Decaimiento offline implementado con tope 48 h (se activa automáticamente cuando llega hora válida vía `justGotValidTime()`)
+- [x] Log de humor por serial en cada cambio + comando de test `m F E A`
 
 **Sabés que está lista cuando:** apagás el dispositivo con un humor determinado, lo encendés, y el personaje arranca con la misma expresión que tenía. El humor cambia solo con el paso del tiempo. (Con Etapa 6 completa: si estuvo apagado "un día" — simulado con hora forzada — arranca notablemente más aburrido.)
 
@@ -161,21 +147,19 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Agregar credenciales WiFi en defines o archivo de configuración (nunca hardcodeadas en el repo)
-- [ ] Implementar conexión WiFi con timeout de 10 s y fallback a modo sin hora
-- [ ] **Portal cautivo de configuración**: si no hay credenciales o la conexión falla, levantar AP `espToy-setup` con página web servida por el ESP32 para elegir red y clave desde el teléfono (guardar en NVS)
-- [ ] Botón "usar la hora de este teléfono" en el portal: el navegador envía su hora local + zona → setea el RTC sin internet
-- [ ] Activar el decaimiento offline de Etapa 5 (ya con hora válida disponible)
-- [ ] Sincronizar hora con NTP (`pool.ntp.org`) usando `configTime` de Arduino
-- [ ] Definir rango nocturno: 22:00-07:00 (configurable como constantes)
-- [ ] Implementar estado `SLEEPING`:
-  - Expresión: ojos cerrados con ZZZ animadas
-  - Sonido: ronquido suave periódico (si buzzer disponible)
-  - Entradas ignoradas... excepto al despertar
-- [ ] Al presionar cualquier botón durante el sueño: expresión `ANGRY` breve ("me despertaste") y luego vuelve a dormir
-- [ ] Desconectar WiFi después de sincronizar para ahorrar energía
-- [ ] Mostrar hora en la pantalla opcionalmente (esquina, fuente pequeña)
-- [ ] Simular hora nocturna por serial para pruebas sin esperar la noche
+- [x] Credenciales solo en NVS vía portal (nada hardcodeado; `secrets.h` quedó como convención opcional sin uso)
+- [x] Conexión WiFi con timeout de 10 s y fallback (a portal / modo sin hora) — `src/net.cpp`
+- [x] **Portal cautivo**: AP `espToy-setup` (192.168.4.1) con página para elegir red y clave desde el teléfono — verificado activo en hardware; indicador "WiFi: espToy-setup" en pantalla
+- [x] Botón "usar la hora de este teléfono" en el portal (`/settime` con epoch UTC del navegador + `settimeofday`)
+- [x] Decaimiento offline conectado vía `justGotValidTime()` → `applyOfflineDecay()`
+- [x] NTP con `configTime(TZ_OFFSET_S=UTC-3, pool.ntp.org)` + resync diario
+- [x] Rango nocturno 22:00-07:00 en config.h
+- [x] Estado `SLEEPING`: expresión DORMIDO con Zzz, ronquido periódico (2.5-3.5 s), touch no lo despierta
+- [x] Botón durante el sueño → `ENOJADO` 2.5 s ("GRRR... dejame dormir") + efecto de humor, y vuelve a dormir — verificado con hora forzada
+- [x] `WiFi.disconnect()` + `WIFI_OFF` después de sincronizar
+- [x] Simulación de hora por serial (`h 23` / `h -1`) — **verificado: duerme a las 23, despierta a las 8**
+- [ ] Prueba de NTP real — pendiente: el usuario debe conectarse al AP `espToy-setup` desde el teléfono y configurar su WiFi (o usar el botón de hora del teléfono)
+- [ ] (Opcional, descartado por ahora) Mostrar hora en pantalla
 
 **Sabés que está lista cuando:** con hora forzada a las 23:00 por serial, el personaje duerme y ronca. Al presionar un botón, se enoja brevemente y vuelve a dormir.
 
