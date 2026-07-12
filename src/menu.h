@@ -10,10 +10,12 @@ struct MenuData {
     bool    horaValida;
     int     hora;           // 0-23 (válido solo si horaValida)
     int     minuto;         // 0-59 (ídem)
+    int     dia;            // 1-31 (ídem)
+    int     mes;            // 1-12 (ídem)
+    int     diaSemana;      // 0=domingo, como tm_wday (ídem)
     bool    wifiConfigurada;   // hay SSID guardado
     const char* ssid;          // SSID guardado ("" si no hay)
     bool    portalActivo;
-    const char* fwVersion;
 };
 
 // Dibuja la pantalla de estado completa (no llama clearBuffer/sendBuffer)

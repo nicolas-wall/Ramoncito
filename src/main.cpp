@@ -223,11 +223,8 @@ void loop() {
     input.poll(ahora);
     leerSerial();
 
-    if (ahora - ultimoLed >= 500) {
-        ultimoLed = ahora;
-        ledEncendido = !ledEncendido;
-        digitalWrite(PIN_LED, ledEncendido ? LOW : HIGH);
-    }
+    // (El LED de latido de la Etapa 0 quedó desactivado a pedido del
+    //  usuario; el pin queda en HIGH = apagado desde setup().)
 
     if (ahora - ultimoFrame < FRAME_MS) return;
     ultimoFrame = ahora;
@@ -307,14 +304,20 @@ void loop() {
         md.aburrimiento    = mood.boredom();
         md.horaValida      = net.timeValid();
         md.hora = md.minuto = 0;
+        md.dia = md.mes = md.diaSemana = 0;
         if (md.horaValida) {
             struct tm ti;
-            if (getLocalTime(&ti, 10)) { md.hora = ti.tm_hour; md.minuto = ti.tm_min; }
+            if (getLocalTime(&ti, 10)) {
+                md.hora      = ti.tm_hour;
+                md.minuto    = ti.tm_min;
+                md.dia       = ti.tm_mday;
+                md.mes       = ti.tm_mon + 1;
+                md.diaSemana = ti.tm_wday;
+            }
         }
         md.wifiConfigurada = net.hasCredentials();
         md.ssid            = net.ssidGuardado();
         md.portalActivo    = net.portalActive();
-        md.fwVersion       = FW_VERSION;
         menuRender(u8g2, md);
     } else {
         face.render(u8g2);

@@ -8,51 +8,64 @@
 static const int SCREEN_W  = 128;
 static const int SCREEN_H  = 64;
 
-// Fila superior: "espToy vX.Y.Z" + hora
-static const int HEADER_Y  = 10;   // baseline de la fuente chica (header izq)
-static const int HORA_Y    = 12;   // baseline fuente grande (hora)
-static const int SEP_Y     = 15;   // línea separadora horizontal
+// Header (y 0-14): izquierda "espToy" + fecha, derecha reloj HH:MM
+// Los ~48 px de la derecha (x=80..127) son EXCLUSIVOS del reloj.
+static const int RELOJ_ZONA_X = 80;  // el texto de la izquierda nunca pasa de acá
+static const int TITULO_Y     = 5;   // baseline "espToy" (fuente 4x6, línea 1)
+static const int FECHA_Y      = 14;  // baseline fecha (fuente 5x8, línea 2)
+static const int HORA_Y       = 12;  // baseline reloj (fuente 9x15B)
+static const int SEP_Y        = 15;  // línea separadora horizontal
 
 // Fila WiFi
 static const int WIFI_Y    = 24;   // baseline
 
 // Tres barras de stats
-// Cada stat ocupa ~11 px de alto; primera a y=33 (baseline etiqueta)
 static const int STAT_START_Y = 36; // baseline primera etiqueta
 static const int STAT_STEP    = 12; // distancia entre filas
 
-// Barra de progreso
+// Columnas de cada fila de stat:
+//   etiqueta: x=0..44 | barra: x=46..99 | numero: alineado a derecha en x=113..127
 static const int BAR_X      = 46;  // inicio barra
-static const int BAR_W      = 72;  // ancho total del marco
+static const int BAR_W      = 54;  // ancho total del marco (46+54 = 100)
 static const int BAR_H      = 7;   // alto del marco
-static const int NUM_X      = BAR_X + BAR_W + 2; // posición del número % (si entra)
+// Número con "%3u" en 5x8 (monoespaciada): 3 chars * 5 px = 15 px.
+// Alineado a la derecha: 128 - 15 = 113 → ocupa x=113..127, "100" entra SIEMPRE.
+static const int NUM_W      = 15;
+static const int NUM_X      = SCREEN_W - NUM_W;
+
+// Nombres cortos de día de semana, índice 0=domingo (como tm_wday). Sin acentos.
+static const char* const DIAS_SEMANA[7] = {
+    "dom", "lun", "mar", "mie", "jue", "vie", "sab"
+};
 
 // ──────────────────────────────────────────────────
 // Helpers internos
 // ──────────────────────────────────────────────────
 
-// Dibuja barra de progreso (0-100) con etiqueta a la izquierda
+// Dibuja barra de progreso (0-100) con etiqueta a la izquierda y número a la derecha
 // label: texto corto, val: 0-100, yBaseline: baseline de la etiqueta
 static void dibujarBarra(U8G2 &u8, const char *label, uint8_t val, int yBaseline) {
-    // Etiqueta (fuente ya seteada por el caller)
+    // Etiqueta (fuente 5x8 ya seteada por el caller)
     u8.drawStr(0, yBaseline, label);
 
     // Marco de la barra: alineado verticalmente con la etiqueta
     int barY = yBaseline - BAR_H + 1; // tope de la caja
     u8.drawFrame(BAR_X, barY, BAR_W, BAR_H);
 
-    // Relleno proporcional al valor (dejamos 1px de margen interno)
+    // Relleno proporcional al valor (1 px de margen interno)
     if (val > 0) {
-        int fillW = (int)((BAR_W - 2) * val / 100);
+        int fillW = (BAR_W - 2) * (int)val / 100;
         if (fillW > BAR_W - 2) fillW = BAR_W - 2;
         if (fillW > 0) {
             u8.drawBox(BAR_X + 1, barY + 1, fillW, BAR_H - 2);
         }
     }
 
-    // Número al lado derecho (si hay espacio — lo hay: 128-46-72-2 = 8 px, caben 2 dígitos en 5x8)
+    // Número alineado a la derecha con ancho fijo de 3 dígitos:
+    // "%3u" rellena con espacios ("  5", " 42", "100") → columna estable
+    // y el peor caso "100" entra completo en x=113..127.
     char numBuf[5];
-    snprintf(numBuf, sizeof(numBuf), "%d", (int)val);
+    snprintf(numBuf, sizeof(numBuf), "%3u", (unsigned)val);
     u8.drawStr(NUM_X, yBaseline, numBuf);
 }
 
@@ -73,23 +86,36 @@ static void truncarSSID(char *dst, const char *src, int maxChars) {
 // ──────────────────────────────────────────────────
 void menuRender(U8G2 &u8, const MenuData &d) {
 
-    // ── FILA SUPERIOR IZQUIERDA: "espToy" + version ──
-    u8.setFont(u8g2_font_5x8_tf);  // fuente chica 5x8
+    // ── HEADER IZQUIERDA: "espToy" + fecha (dos líneas chicas) ──
+    // La zona x >= RELOJ_ZONA_X es exclusiva del reloj: estos textos
+    // son cortos y nunca la alcanzan ("sab 12/07" = 9*5 = 45 px).
+    if (d.horaValida) {
+        // Línea 1: "espToy" en 4x6 (descendentes de 'p'/'y' llegan a y=6)
+        u8.setFont(u8g2_font_4x6_tf);
+        u8.drawStr(0, TITULO_Y, "espToy");
 
-    char headerBuf[32];
-    snprintf(headerBuf, sizeof(headerBuf), "espToy %s", d.fwVersion ? d.fwVersion : "");
-    u8.drawStr(0, HEADER_Y, headerBuf);
+        // Línea 2: fecha "sab 12/07" en 5x8 (top en y=8, no pisa la línea 1)
+        u8.setFont(u8g2_font_5x8_tf);
+        int ds = (d.diaSemana >= 0 && d.diaSemana <= 6) ? d.diaSemana : 0;
+        char fechaBuf[12];
+        snprintf(fechaBuf, sizeof(fechaBuf), "%s %02d/%02d",
+                 DIAS_SEMANA[ds], d.dia, d.mes);
+        u8.drawStr(0, FECHA_Y, fechaBuf);
+    } else {
+        // Sin hora válida: solo "espToy", centrado verticalmente en el header
+        u8.setFont(u8g2_font_5x8_tf);
+        u8.drawStr(0, 11, "espToy");
+    }
 
-    // ── FILA SUPERIOR DERECHA: HORA ──
-    // Fuente mediana/grande para la hora
-    u8.setFont(u8g2_font_9x15B_tf);  // ~9px ancho, 15px alto
+    // ── HEADER DERECHA: RELOJ HH:MM ──
+    u8.setFont(u8g2_font_9x15B_tf);  // 9 px por char → "HH:MM" = 45 px
     char horaBuf[6];
     if (d.horaValida) {
         snprintf(horaBuf, sizeof(horaBuf), "%02d:%02d", d.hora, d.minuto);
     } else {
         snprintf(horaBuf, sizeof(horaBuf), "--:--");
     }
-    // Alinear a la derecha: cada carácter ocupa ~9px, string de 5 chars = ~45px
+    // Alineado a la derecha dentro de su zona reservada (x≈83..127)
     int horaW = (int)u8.getStrWidth(horaBuf);
     u8.drawStr(SCREEN_W - horaW, HORA_Y, horaBuf);
 
@@ -101,12 +127,10 @@ void menuRender(U8G2 &u8, const MenuData &d) {
 
     char wifiBuf[32];
     if (d.portalActivo) {
-        // Portal activo: mostrar nombre de la red del portal
+        // Portal activo
         snprintf(wifiBuf, sizeof(wifiBuf), "WiFi: portal setup");
     } else if (d.wifiConfigurada && d.horaValida) {
         // WiFi conectada y hora sincronizada
-        // Espacio disponible para SSID: "WiFi: " (6) + SSID + " (sync OK)" (9) = 15 chars + SSID
-        // Pantalla 128px / 5px por char = 25 chars totales; "WiFi: " = 6, " OK" = 3 => SSID max=16
         char ssidTrunc[17];
         truncarSSID(ssidTrunc, d.ssid ? d.ssid : "", 12);
         snprintf(wifiBuf, sizeof(wifiBuf), "WiFi: %s OK", ssidTrunc);
@@ -124,7 +148,7 @@ void menuRender(U8G2 &u8, const MenuData &d) {
     // ── TRES BARRAS DE STATS ──
     u8.setFont(u8g2_font_5x8_tf);
 
-    dibujarBarra(u8, "Feliz",    d.felicidad,   STAT_START_Y);
-    dibujarBarra(u8, "Energia",  d.energia,     STAT_START_Y + STAT_STEP);
+    dibujarBarra(u8, "Feliz",    d.felicidad,    STAT_START_Y);
+    dibujarBarra(u8, "Energia",  d.energia,      STAT_START_Y + STAT_STEP);
     dibujarBarra(u8, "Aburrim.", d.aburrimiento, STAT_START_Y + STAT_STEP * 2);
 }
