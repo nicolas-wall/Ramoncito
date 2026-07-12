@@ -264,6 +264,9 @@ void loop() {
         proximoRonquido = ahora + 2500 + (esp_random() % 1000);
     }
 
+    // Animar la cara (interpolación, parpadeo, mirada, respiración)
+    face.update(ahora);
+
     // Render
     u8g2.clearBuffer();
     face.render(u8g2);
