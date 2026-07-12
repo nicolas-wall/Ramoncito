@@ -13,9 +13,9 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Instalar VS Code + extensión PlatformIO IDE
-- [ ] Crear proyecto PlatformIO nuevo en `D:\Claude\espToy`
-- [ ] Configurar `platformio.ini`:
+- [x] Instalar VS Code + extensión PlatformIO IDE (PlatformIO Core 6.1.19 ya presente)
+- [x] Crear proyecto PlatformIO nuevo en `D:\Claude\espToy`
+- [x] Configurar `platformio.ini`:
   ```ini
   [env:seeed_xiao_esp32s3]
   platform = espressif32
@@ -23,9 +23,9 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
   framework = arduino
   monitor_speed = 115200
   ```
-- [ ] Escribir `main.cpp` con blink del LED integrado + `Serial.println` en el loop
-- [ ] Compilar sin errores (`pio run`)
-- [ ] Flashear (`pio run --target upload`)
+- [x] Escribir `main.cpp` con blink del LED integrado + `Serial.println` en el loop
+- [x] Compilar sin errores (`pio run`) — RAM 5.6 %, Flash 7.6 %
+- [ ] Flashear (`pio run --target upload`) — pendiente: conectar el XIAO por USB-C
 - [ ] Abrir monitor serial y verificar salida
 
 **Sabés que está lista cuando:** el monitor serial muestra mensajes periódicos (ej. `"espToy boot OK — tick N"`) y el LED parpadea.
