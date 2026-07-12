@@ -40,16 +40,13 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Agregar librería U8g2 a `platformio.ini` (`lib_deps = olikraus/U8g2`)
-- [ ] Escribir sketch de scan I2C para confirmar dirección (esperar `0x3C`)
-- [ ] Instanciar display:
-  ```cpp
-  U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, 6, 5);
-  ```
-- [ ] Inicializar con `u8g2.begin()` y dibujar texto/rectángulo de prueba
-- [ ] Implementar loop de animación simple (objeto que se mueve) con timestamp
-- [ ] Medir y loguear FPS por serial: `millis()` entre frames
-- [ ] Ajustar para alcanzar ~30 fps (verificar que `clearBuffer` + `sendBuffer` no dominen el tiempo)
+- [x] Agregar librería U8g2 a `platformio.ini` (`lib_deps = olikraus/U8g2`) — instalada 2.36.18
+- [x] Escribir sketch de scan I2C para confirmar dirección — **confirmado 0x3C**
+- [x] Instanciar display: `U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE)` (pines I2C por defecto del XIAO)
+- [x] Inicializar con `u8g2.begin()` y dibujar texto/rectángulo de prueba — inicializa OK
+- [x] Implementar loop de animación simple (pelota que rebota) con timestamp
+- [x] Medir y loguear FPS por serial — log 1/s con fps + heap
+- [x] Ajustar para alcanzar ~30 fps — **31 fps estables medidos**, heap fijo en 368400 bytes
 
 **Sabés que está lista cuando:** la pantalla muestra una animación fluida sostenida a ~30 fps logueados por serial.
 
