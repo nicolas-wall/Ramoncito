@@ -3,12 +3,21 @@
 //  Implementación del módulo de red.
 //
 //  Máquina de estados:
-//    SIN_CREDENCIALES → PORTAL
+//    SIN_CREDENCIALES → PORTAL (solo AP)
 //    CONECTANDO       → SINCRONIZANDO_NTP  (WL_CONNECTED antes de timeout)
-//    CONECTANDO       → PORTAL             (timeout WIFI_TIMEOUT_MS)
-//    SINCRONIZANDO_NTP→ REPOSO             (hora válida o timeout 15 s)
+//    CONECTANDO       → PORTAL en AP_STA   (timeout con credenciales; el
+//                       portal atiende Y se reintenta WiFi.begin cada 30 s)
+//    CONECTANDO       → REPOSO             (timeout de un resync: silencioso)
+//    PORTAL(AP_STA)   → SINCRONIZANDO_NTP  (un reintento conectó; el portal
+//                       SIGUE atendiendo hasta que NTP confirme)
+//    SINCRONIZANDO_NTP→ REPOSO             (hora válida; cierra portal si había)
+//    SINCRONIZANDO_NTP→ PORTAL             (timeout NTP con portal activo)
+//    PORTAL           → cierre DIFERIDO tras /settime (flag + timestamp,
+//                       procesado en update(); nunca dentro de un handler)
 //    REPOSO           → CONECTANDO         (resync diario NTP_RESYNC_MS)
-//    PORTAL           → reinicio por ESP.restart() al guardar credenciales
+//
+//  El scan de redes es SIEMPRE asíncrono (WiFi.scanNetworks(true, true)):
+//  nunca se bloquea el loop, la cara sigue animando a 30 fps.
 //
 //  El portal cautivo responde también a las sondas de Android/iOS para
 //  que el teléfono muestre la notificación de "iniciar sesión".
@@ -25,11 +34,15 @@
 // Instancia global accesible desde main.cpp
 Net net;
 
-// Constantes internas
-static const uint32_t NTP_TIMEOUT_MS   = 15000;  // 15 s esperando NTP
-static const uint8_t  DNS_PORT         = 53;
-static const IPAddress AP_IP           (192, 168, 4, 1);
-static const IPAddress AP_SUBNET       (255, 255, 255, 0);
+// Constantes internas del módulo
+static const uint32_t NTP_TIMEOUT_MS       = 15000;  // 15 s esperando NTP
+static const uint32_t REINTENTO_STA_MS     = 30000;  // reintento de conexión c/30 s
+static const uint32_t CIERRE_PORTAL_MS     = 3000;   // demora del cierre tras /settime
+static const uint32_t SCAN_GUARDA_BEGIN_MS = 5000;   // no scanear si begin() fue hace <5 s
+static const uint8_t  MAX_REINTENTOS_SILENCIOSOS = 10; // ~5 min y desiste
+static const uint8_t  DNS_PORT             = 53;
+static const IPAddress AP_IP               (192, 168, 4, 1);
+static const IPAddress AP_SUBNET           (255, 255, 255, 0);
 
 // ================================================================
 //  begin() — llamar desde setup()
@@ -58,21 +71,66 @@ void Net::update(uint32_t now) {
                 Serial.printf("[net] conectado a '%s' IP: %s\n",
                               _ssid.c_str(),
                               WiFi.localIP().toString().c_str());
+                _ultimoError = "";            // conexión OK → limpiar error
+                _reintentoSilencioso = false;
                 // Configurar zona horaria y disparar NTP
                 configTime(TZ_OFFSET_S, 0, NTP_SERVER);
                 _tInicioNTP = now;
                 _estado = Estado::SINCRONIZANDO_NTP;
+
             } else if ((now - _tInicioConexion) >= WIFI_TIMEOUT_MS) {
-                Serial.printf("[net] timeout de conexión a '%s' → portal\n",
-                              _ssid.c_str());
-                WiFi.disconnect(true);
-                _iniciarPortal();
+
+                if (_reintentoSilencioso) {
+                    // Modo silencioso (post-portal): reintentar cada 30 s
+                    // sin volver a abrir el portal, con tope de intentos.
+                    if ((now - _tUltimoBegin) >= REINTENTO_STA_MS) {
+                        if (_reintentosRestantes == 0) {
+                            Serial.println("[net] reintentos silenciosos agotados — WiFi off");
+                            WiFi.disconnect(true);
+                            WiFi.mode(WIFI_OFF);
+                            // Si hay hora válida, el resync diario volverá a intentar
+                            if (_horaValida && _tUltimaSync == 0) _tUltimaSync = now;
+                            _reintentoSilencioso = false;
+                            _estado = Estado::REPOSO;
+                        } else {
+                            _reintentosRestantes--;
+                            Serial.printf("[net] reintento silencioso de conexión a '%s' (quedan %u)\n",
+                                          _ssid.c_str(), _reintentosRestantes);
+                            WiFi.begin(_ssid.c_str(), _pass.c_str());
+                            _tUltimoBegin = now;
+                            _huboBegin = true;
+                        }
+                    }
+
+                } else if (_horaValida) {
+                    // Falló un resync diario: NO molestar con el portal,
+                    // el equipo ya funciona con hora. Reintentar en 24 h.
+                    Serial.printf("[net] resync: timeout de conexión a '%s' — reintento en 24 h\n",
+                                  _ssid.c_str());
+                    WiFi.disconnect(true);
+                    WiFi.mode(WIFI_OFF);
+                    _tUltimaSync = now;   // corre la ventana del próximo resync
+                    _estado = Estado::REPOSO;
+
+                } else {
+                    // Falló la conexión inicial: portal en AP_STA que informa
+                    // el error y sigue reintentando la STA cada 30 s.
+                    Serial.printf("[net] timeout de conexión a '%s' → portal (AP_STA, sigo reintentando)\n",
+                                  _ssid.c_str());
+                    _ultimoError = "No pude conectarme a '" + _ssid +
+                                   "'. Revisá la clave. Ojo: el ESP32 solo ve redes de 2.4 GHz (no 5 GHz).";
+                    _iniciarPortal();
+                }
             }
             break;
         }
 
         // ---- SINCRONIZANDO_NTP -----------------------------------
         case Estado::SINCRONIZANDO_NTP: {
+            // Si el portal sigue abierto (conectó durante AP_STA), seguir
+            // atendiéndolo para no dejar colgado al teléfono.
+            if (_portalActivo) _atenderPortal();
+
             time_t ahora = time(nullptr);
             if (ahora > 1600000000UL) {
                 // Hora válida obtenida por NTP
@@ -82,16 +140,32 @@ void Net::update(uint32_t now) {
                               ti.tm_hour, ti.tm_min, ti.tm_sec,
                               ti.tm_mday, ti.tm_mon + 1, ti.tm_year + 1900);
                 _tUltimaSync = now;
+                _ultimoError = "";
+                // El portal ya cumplió: cerrarlo si estaba activo
+                if (_portalActivo) _detenerPortal();
                 // Apagar WiFi para ahorrar energía y reducir ruido en el touch
                 WiFi.disconnect(true);
                 WiFi.mode(WIFI_OFF);
                 _marcarHoraValida();
                 _estado = Estado::REPOSO;
+
             } else if ((now - _tInicioNTP) >= NTP_TIMEOUT_MS) {
-                Serial.println("[net] advertencia: timeout esperando NTP — sin hora confiable");
-                WiFi.disconnect(true);
-                WiFi.mode(WIFI_OFF);
-                _estado = Estado::REPOSO;
+                if (_portalActivo) {
+                    // Conectados pero sin respuesta NTP (¿sin internet?).
+                    // Volver al portal para que el usuario pueda usar la hora
+                    // del teléfono. SNTP sigue reintentando en background.
+                    Serial.println("[net] advertencia: timeout NTP con portal activo — vuelvo al portal");
+                    _ntpTimeoutConectado = true;
+                    _ultimoError = "Me conecté a '" + _ssid +
+                                   "' pero no pude obtener la hora de internet. "
+                                   "Podés usar la hora de este teléfono.";
+                    _estado = Estado::PORTAL;
+                } else {
+                    Serial.println("[net] advertencia: timeout esperando NTP — sin hora confiable");
+                    WiFi.disconnect(true);
+                    WiFi.mode(WIFI_OFF);
+                    _estado = Estado::REPOSO;
+                }
             }
             break;
         }
@@ -110,8 +184,74 @@ void Net::update(uint32_t now) {
 
         // ---- PORTAL ----------------------------------------------
         case Estado::PORTAL: {
-            if (_dns)    _dns->processNextRequest();
-            if (_server) _server->handleClient();
+            _atenderPortal();
+
+            // Cierre diferido programado por /settime (nunca dentro del handler)
+            if (_cierrePendiente && (int32_t)(now - _tCierrePortal) >= 0) {
+                _detenerPortal();
+                if (_portalConSTA && WiFi.status() != WL_CONNECTED) {
+                    // Quedan credenciales sin conectar: seguir reintentando
+                    // la STA en silencio, ya sin AP.
+                    Serial.println("[net] portal cerrado — sigo reintentando la conexión en silencio");
+                    WiFi.mode(WIFI_STA);
+                    _reintentoSilencioso = true;
+                    _reintentosRestantes = MAX_REINTENTOS_SILENCIOSOS;
+                    _tInicioConexion = now - WIFI_TIMEOUT_MS; // timeout ya vencido: gate por _tUltimoBegin
+                    _estado = Estado::CONECTANDO;
+                } else {
+                    WiFi.disconnect(true);
+                    WiFi.mode(WIFI_OFF);
+                    _estado = Estado::REPOSO;
+                }
+                break;
+            }
+
+            // Reintentos de STA con el portal activo (modo AP_STA)
+            if (_portalConSTA) {
+                wl_status_t st = WiFi.status();
+
+                if (st == WL_CONNECTED && !_ntpTimeoutConectado) {
+                    // ¡Un reintento conectó! Pasar a NTP; el portal sigue
+                    // atendiendo (lo cierra el éxito de NTP).
+                    Serial.printf("[net] conectado a '%s' durante el portal — IP: %s\n",
+                                  _ssid.c_str(), WiFi.localIP().toString().c_str());
+                    _ultimoError = "";
+                    configTime(TZ_OFFSET_S, 0, NTP_SERVER);
+                    _tInicioNTP = now;
+                    _estado = Estado::SINCRONIZANDO_NTP;
+
+                } else if (st != WL_CONNECTED) {
+                    // Si se cayó la conexión, rehabilitar el ciclo de NTP
+                    _ntpTimeoutConectado = false;
+                    // Reintento cada 30 s (no pisar un scan en curso)
+                    if ((now - _tUltimoReintento) >= REINTENTO_STA_MS &&
+                        WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
+                        Serial.printf("[net] reintento de conexión a '%s' (portal activo)\n",
+                                      _ssid.c_str());
+                        WiFi.begin(_ssid.c_str(), _pass.c_str());
+                        _tUltimoReintento = now;
+                        _tUltimoBegin     = now;
+                        _huboBegin        = true;
+                    }
+
+                } else if (_ntpTimeoutConectado) {
+                    // Conectado pero NTP había fallado: SNTP reintenta en
+                    // background; si la hora llega tarde, aprovecharla.
+                    if (time(nullptr) > 1600000000UL) {
+                        struct tm ti;
+                        getLocalTime(&ti);
+                        Serial.printf("[net] NTP llegó tarde — hora local: %02d:%02d:%02d\n",
+                                      ti.tm_hour, ti.tm_min, ti.tm_sec);
+                        _tUltimaSync = now;
+                        _ultimoError = "";
+                        _marcarHoraValida();
+                        _detenerPortal();
+                        WiFi.disconnect(true);
+                        WiFi.mode(WIFI_OFF);
+                        _estado = Estado::REPOSO;
+                    }
+                }
+            }
             break;
         }
 
@@ -164,10 +304,11 @@ void Net::forceHour(int h) {
 }
 
 // ================================================================
-//  portalActive()
+//  portalActive() — refleja el flag real (el portal puede seguir
+//  activo durante SINCRONIZANDO_NTP en el flujo AP_STA)
 // ================================================================
 bool Net::portalActive() const {
-    return (_estado == Estado::PORTAL);
+    return _portalActivo;
 }
 
 // ================================================================
@@ -185,10 +326,8 @@ bool Net::justGotValidTime() {
 //  startPortal() — forzar el portal manualmente
 // ================================================================
 void Net::startPortal() {
-    if (_estado == Estado::PORTAL) return;  // ya está activo
-    // Asegurarse de que el WiFi en modo STA esté desconectado
-    WiFi.disconnect(true);
-    _iniciarPortal();
+    if (_portalActivo) return;  // ya está activo
+    _iniciarPortal();           // AP_STA si hay credenciales, AP si no
 }
 
 // ================================================================
@@ -214,6 +353,9 @@ void Net::_iniciarConexion() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(_ssid.c_str(), _pass.c_str());
     _tInicioConexion = millis();
+    _tUltimoBegin    = _tInicioConexion;
+    _huboBegin       = true;
+    _reintentoSilencioso = false;
     _estado = Estado::CONECTANDO;
 }
 
@@ -228,25 +370,127 @@ void Net::_marcarHoraValida() {
 }
 
 // ================================================================
-//  _iniciarPortal() — AP + DNS + WebServer
+//  _iniciarPortal() — AP (o AP_STA si hay credenciales) + DNS + HTTP
 // ================================================================
 void Net::_iniciarPortal() {
-    Serial.printf("[net] portal cautivo iniciado — SSID: '%s'  IP: %s\n",
-                  PORTAL_AP_SSID, AP_IP.toString().c_str());
+    // Con credenciales guardadas el portal corre en AP_STA para poder
+    // seguir reintentando la conexión mientras el usuario configura.
+    _portalConSTA = (_ssid.length() > 0);
 
-    // Configurar AP sin clave
-    WiFi.mode(WIFI_AP);
+    WiFi.mode(_portalConSTA ? WIFI_AP_STA : WIFI_AP);
     WiFi.softAPConfig(AP_IP, AP_IP, AP_SUBNET);
-    WiFi.softAP(PORTAL_AP_SSID);
+    WiFi.softAP(PORTAL_AP_SSID);   // AP abierto, sin clave
 
-    // Escanear redes al entrar al portal (modo AP lo permite con asyncMode=false,
-    // showHidden=true). Bloqueante ~1-2 s, pero ocurre solo una vez al inicio.
-    Serial.println("[net] escaneando redes WiFi...");
-    int n = WiFi.scanNetworks(false, true);
+    Serial.printf("[net] portal cautivo iniciado — SSID: '%s'  IP: %s  modo: %s\n",
+                  PORTAL_AP_SSID, AP_IP.toString().c_str(),
+                  _portalConSTA ? "AP_STA (reintenta conexión)" : "AP");
+
+    // Scan de redes ASÍNCRONO: los resultados se recogen en _atenderPortal()
+    // con WiFi.scanComplete(); la cara nunca se congela.
+    _scanCache = "";
+    _lanzarScan();
+
+    // DNS Server: redirige todo a la IP del AP
+    if (!_dns) _dns = new DNSServer();
+    _dns->start(DNS_PORT, "*", AP_IP);
+
+    // WebServer: crear y registrar rutas UNA sola vez (re-registrar en
+    // cada apertura duplicaría los handlers); luego solo begin()/stop().
+    if (!_server) {
+        _server = new WebServer(80);
+
+        _server->on("/", [this]() { _handleRoot(); });
+        _server->on("/save", HTTP_POST, [this]() { _handleSave(); });
+        _server->on("/settime", [this]() { _handleSetTime(); });
+        _server->on("/scan", [this]() { _handleScan(); });
+
+        // Sondas de portal cautivo de Android, iOS, Windows
+        _server->on("/generate_204",             [this]() { _handleCaptiveRedirect(); });
+        _server->on("/gen_204",                  [this]() { _handleCaptiveRedirect(); });
+        _server->on("/hotspot-detect.html",      [this]() { _handleCaptiveRedirect(); });
+        _server->on("/library/test/success.html",[this]() { _handleCaptiveRedirect(); });
+        _server->on("/connecttest.txt",          [this]() { _handleCaptiveRedirect(); });
+        _server->on("/redirect",                 [this]() { _handleCaptiveRedirect(); });
+        _server->on("/canonical.html",           [this]() { _handleCaptiveRedirect(); });
+        _server->on("/success.txt",              [this]() { _handleCaptiveRedirect(); });
+        _server->on("/ncsi.txt",                 [this]() { _handleCaptiveRedirect(); });
+
+        // Cualquier ruta no reconocida → redirigir al portal
+        _server->onNotFound([this]() { _handleCaptiveRedirect(); });
+    }
+    _server->begin();
+
+    _cierrePendiente     = false;
+    _ntpTimeoutConectado = false;
+    _tUltimoReintento    = millis();   // primer reintento STA a los 30 s
+    _portalActivo        = true;
+    _estado = Estado::PORTAL;
+}
+
+// ================================================================
+//  _detenerPortal() — apaga AP, DNS y HTTP. NO destruye los objetos
+//  (se reutilizan si el portal vuelve a abrirse). Llamar SIEMPRE
+//  desde update(), nunca desde un handler del WebServer.
+// ================================================================
+void Net::_detenerPortal() {
+    if (!_portalActivo) return;
+    if (_dns)    _dns->stop();
+    if (_server) _server->stop();
+    WiFi.softAPdisconnect(true);
+    _portalActivo    = false;
+    _cierrePendiente = false;
+    Serial.println("[net] portal cautivo detenido");
+}
+
+// ================================================================
+//  _atenderPortal() — DNS + HTTP + recolección del scan async.
+//  Se llama desde PORTAL y también desde SINCRONIZANDO_NTP si el
+//  portal sigue abierto. Nunca bloquea más que unos ms.
+// ================================================================
+void Net::_atenderPortal() {
+    if (_dns)    _dns->processNextRequest();
+    if (_server) _server->handleClient();
+
+    // ¿Terminó el scan asíncrono?
+    int n = WiFi.scanComplete();
+    if (n >= 0) {
+        _regenerarScanCache(n);
+        WiFi.scanDelete();
+        Serial.printf("[net] scan completado: %d redes\n", n);
+    } else if (n == WIFI_SCAN_FAILED && _scanCache.length() == 0) {
+        // Nunca hubo resultados (scan falló o no llegó a lanzarse):
+        // reintentar respetando la guarda del begin() reciente.
+        _lanzarScan();
+    }
+}
+
+// ================================================================
+//  _lanzarScan() — scan asíncrono de redes. No hace nada si ya hay
+//  un scan corriendo o si hubo un WiFi.begin() hace <5 s (en AP_STA
+//  un scan pisa el intento de asociación).
+// ================================================================
+void Net::_lanzarScan() {
+    // Backoff: máximo un lanzamiento cada 10 s. En AP_STA, mientras la STA
+    // intenta asociarse, scanComplete() devuelve FAILED y sin esta guarda
+    // se relanza en cada frame (spam de log + radio ocupada).
+    static uint32_t tUltimoLanzamiento = 0;
+    uint32_t ahora = millis();
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return;
+    if (_huboBegin && (ahora - _tUltimoBegin) < SCAN_GUARDA_BEGIN_MS) return;
+    if (tUltimoLanzamiento != 0 && (ahora - tUltimoLanzamiento) < 10000) return;
+    tUltimoLanzamiento = ahora;
+    WiFi.scanNetworks(true, true);   // async=true, incluir redes ocultas
+    Serial.println("[net] scan de redes lanzado (asincrónico)");
+}
+
+// ================================================================
+//  _regenerarScanCache() — arma la lista <li> desde los resultados
+// ================================================================
+void Net::_regenerarScanCache(int n) {
     _scanCache = "";
     if (n > 0) {
         for (int i = 0; i < n; i++) {
-            // Elemento de lista clickeable que copia el SSID al campo de texto
+            // Elemento clickeable que copia el SSID al campo de texto
             _scanCache += "<li onclick=\"document.getElementById('ssid').value='"
                        + WiFi.SSID(i) + "'\">"
                        + WiFi.SSID(i)
@@ -256,36 +500,6 @@ void Net::_iniciarPortal() {
     } else {
         _scanCache = "<li><em>No se encontraron redes</em></li>";
     }
-
-    // DNS Server: redirige todo a la IP del AP
-    if (!_dns) _dns = new DNSServer();
-    _dns->start(DNS_PORT, "*", AP_IP);
-
-    // WebServer en puerto 80
-    if (!_server) _server = new WebServer(80);
-
-    // Rutas
-    _server->on("/", [this]() { _handleRoot(); });
-    _server->on("/save", HTTP_POST, [this]() { _handleSave(); });
-    _server->on("/settime", [this]() { _handleSetTime(); });
-    _server->on("/scan", [this]() { _handleScan(); });
-
-    // Sondas de portal cautivo de Android, iOS, Windows
-    _server->on("/generate_204",            [this]() { _handleCaptiveRedirect(); });
-    _server->on("/gen_204",                 [this]() { _handleCaptiveRedirect(); });
-    _server->on("/hotspot-detect.html",     [this]() { _handleCaptiveRedirect(); });
-    _server->on("/library/test/success.html",[this]() { _handleCaptiveRedirect(); });
-    _server->on("/connecttest.txt",         [this]() { _handleCaptiveRedirect(); });
-    _server->on("/redirect",                [this]() { _handleCaptiveRedirect(); });
-    _server->on("/canonical.html",          [this]() { _handleCaptiveRedirect(); });
-    _server->on("/success.txt",             [this]() { _handleCaptiveRedirect(); });
-    _server->on("/ncsi.txt",                [this]() { _handleCaptiveRedirect(); });
-
-    // Cualquier ruta no reconocida → redirigir al portal
-    _server->onNotFound([this]() { _handleCaptiveRedirect(); });
-
-    _server->begin();
-    _estado = Estado::PORTAL;
 }
 
 // ================================================================
@@ -307,6 +521,8 @@ String Net::_htmlPortal() {
         max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.6)}
   h1{font-size:1.5rem;font-weight:700;margin-bottom:4px;text-align:center}
   .sub{color:#888;font-size:0.85rem;text-align:center;margin-bottom:24px}
+  .banner{background:#3a2a15;color:#ffb86b;border:1px solid #7a5426;
+          border-radius:8px;padding:10px 12px;font-size:0.85rem;margin-bottom:16px}
   label{display:block;font-size:0.8rem;color:#aaa;margin-bottom:4px;margin-top:14px}
   input[type=text],input[type=password]{
     width:100%;background:#2a2a2a;border:1px solid #444;border-radius:8px;
@@ -324,6 +540,7 @@ String Net::_htmlPortal() {
   .btn-primary:hover{background:#7ab3ff}
   .btn-secondary{background:#2a2a2a;color:#ccc;border:1px solid #444;margin-top:10px}
   .btn-secondary:hover{background:#333}
+  .btn-mini{margin-top:8px;padding:8px;font-size:0.85rem;font-weight:400}
   .divider{border:none;border-top:1px solid #333;margin:22px 0}
   #msg{margin-top:14px;padding:10px;border-radius:8px;font-size:0.88rem;display:none}
   .ok{background:#1a3a1a;color:#6fcf6f;border:1px solid #2d6a2d}
@@ -335,15 +552,26 @@ String Net::_htmlPortal() {
 <div class="card">
   <h1>espToy 🤖</h1>
   <p class="sub">Configuración de red y hora</p>
+)rawhtml";
 
+    // Banner de error de la última conexión (si lo hay)
+    if (_ultimoError.length() > 0) {
+        html += "<div class='banner'>" + _ultimoError + "</div>";
+    }
+
+    html += R"rawhtml(
   <!-- Sección WiFi -->
   <form method="POST" action="/save">
     <label>Redes disponibles (tocá para seleccionar)</label>
     <ul id="redes">)rawhtml";
 
-    html += _scanCache;
+    // Caché del scan async (o placeholder mientras se busca)
+    html += (_scanCache.length() > 0)
+                ? _scanCache
+                : String("<li><em>buscando redes…</em></li>");
 
     html += R"rawhtml(</ul>
+    <button type="button" class="btn btn-secondary btn-mini" onclick="rescan()">Buscar redes de nuevo</button>
     <label for="ssid">Nombre de red (SSID)</label>
     <input type="text" id="ssid" name="ssid" placeholder="Mi Red WiFi" autocomplete="off">
     <label for="pass">Contraseña</label>
@@ -382,6 +610,19 @@ function enviarHora() {
       el.textContent = 'Error al enviar la hora.';
       el.style.display = 'block';
     });
+}
+function rescan() {
+  // /scan dispara un scan async y devuelve la cache actual;
+  // repreguntamos a los 4 s para mostrar los resultados frescos.
+  var ul = document.getElementById('redes');
+  fetch('/scan').then(function(r){ return r.text(); }).then(function(t){
+    ul.innerHTML = t;
+    setTimeout(function(){
+      fetch('/scan').then(function(r){ return r.text(); }).then(function(t2){
+        ul.innerHTML = t2;
+      });
+    }, 4000);
+  });
 }
 </script>
 </body>
@@ -434,7 +675,8 @@ void Net::_handleSave() {
         "<p>Credenciales guardadas.<br>El dispositivo se reiniciará y conectará a<br>"
         "<strong>" + nuevoSsid + "</strong></p></div></body></html>");
 
-    // Breve pausa para que la respuesta llegue al navegador, luego reiniciar
+    // Breve pausa para que la respuesta llegue al navegador, luego reiniciar.
+    // (Único delay del módulo: termina en reset, no afecta al loop.)
     delay(1500);
     ESP.restart();
 }
@@ -442,8 +684,6 @@ void Net::_handleSave() {
 void Net::_handleSetTime() {
     // Parámetros: epoch (segundos UTC desde 1970) y tzmin (offset zona del cliente)
     // Nota: usamos el epoch UTC del navegador directamente.
-    // configTime con TZ_OFFSET_S ya fue llamado (o se llama aquí) para que
-    // getLocalTime devuelva la hora local correcta según Argentina.
     if (!_server->hasArg("epoch")) {
         _server->send(400, "text/plain", "falta parámetro epoch");
         return;
@@ -473,33 +713,33 @@ void Net::_handleSetTime() {
                   ti.tm_mday, ti.tm_mon + 1, ti.tm_year + 1900);
 
     _marcarHoraValida();
+    // Cuenta como sincronización: habilita el resync NTP diario en REPOSO
+    _tUltimaSync = millis();
+
+    // El portal cumplió su función: programar cierre DIFERIDO (lo ejecuta
+    // update(); prohibido parar el server desde este handler).
+    _cierrePendiente = true;
+    _tCierrePortal   = millis() + CIERRE_PORTAL_MS;
+    Serial.println("[net] cierre del portal programado en 3 s");
 
     String respuesta = "Hora configurada: ";
-    char buf[32];
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d (hora local)",
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%02d:%02d:%02d (hora local).",
              ti.tm_hour, ti.tm_min, ti.tm_sec);
     respuesta += buf;
+    respuesta += " El portal se cierra en unos segundos. ¡Listo!";
 
     _server->send(200, "text/plain; charset=utf-8", respuesta);
 }
 
 void Net::_handleScan() {
-    // Forzar rescan y actualizar caché
-    int n = WiFi.scanNetworks(false, true);
-    _scanCache = "";
-    if (n > 0) {
-        for (int i = 0; i < n; i++) {
-            _scanCache += "<li onclick=\"document.getElementById('ssid').value='"
-                       + WiFi.SSID(i) + "'\">"
-                       + WiFi.SSID(i)
-                       + " <span class='sig'>(" + String(WiFi.RSSI(i)) + " dBm)</span>"
-                       + "</li>";
-        }
-    } else {
-        _scanCache = "<li><em>No se encontraron redes</em></li>";
-    }
-    // Devolver solo el fragmento HTML de la lista para que JS lo inyecte si se desea
-    _server->send(200, "text/plain; charset=utf-8", _scanCache);
+    // Disparar un rescan ASINCRÓNICO (si se puede) y responder la caché
+    // actual; el navegador repregunta a los segundos para ver lo nuevo.
+    _lanzarScan();
+    String frag = (_scanCache.length() > 0)
+                      ? _scanCache
+                      : String("<li><em>buscando redes…</em></li>");
+    _server->send(200, "text/html; charset=utf-8", frag);
 }
 
 void Net::_handleCaptiveRedirect() {

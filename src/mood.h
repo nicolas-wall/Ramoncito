@@ -24,8 +24,10 @@ public:
     // Carga estado desde NVS o inicializa con defaults si no hay datos guardados
     void begin();
 
-    // Decaimiento temporal + guardado diferido (llamar cada frame o cada FRAME_MS)
-    void update(uint32_t now);
+    // Decaimiento temporal + guardado diferido (llamar cada frame o cada FRAME_MS).
+    // descansando=true (durmiendo de noche o siesta por agotamiento):
+    // en vez de decaer, la energía se recupera de a poco.
+    void update(uint32_t now, bool descansando = false);
 
     // Aplica un efecto de interacción y guarda inmediatamente en NVS
     void apply(MoodEffect e);

@@ -44,6 +44,10 @@ public:
 
 private:
     // ----- Estado interno -----------------------------------------
+    // Nota: el portal puede seguir activo DURANTE SINCRONIZANDO_NTP
+    // (caso AP_STA: conectó en un reintento con el portal abierto).
+    // Por eso "portal activo" es un flag aparte (_portalActivo) y no
+    // se deduce solo del estado.
     enum class Estado : uint8_t {
         SIN_CREDENCIALES,   // sin ssid/pass en NVS → portal
         CONECTANDO,         // WiFi.begin() en curso, esperando WL_CONNECTED
@@ -65,20 +69,40 @@ private:
     uint32_t _tInicioConexion = 0;   // cuándo empezó CONECTANDO
     uint32_t _tInicioNTP      = 0;   // cuándo empezó SINCRONIZANDO_NTP
     uint32_t _tUltimaSync     = 0;   // millis de la última sincronización exitosa
+    uint32_t _tUltimoBegin    = 0;   // millis del último WiFi.begin() (guarda del scan)
+    bool     _huboBegin       = false; // hubo al menos un WiFi.begin()
+
+    // Reintentos de STA (portal AP_STA y modo silencioso post-portal)
+    bool     _reintentoSilencioso  = false; // CONECTANDO sin volver a abrir portal
+    uint8_t  _reintentosRestantes  = 0;     // tope de reintentos silenciosos
+    uint32_t _tUltimoReintento     = 0;     // último WiFi.begin() del portal AP_STA
+
+    // Mensaje de error a mostrar en el portal (vacío = sin error)
+    String _ultimoError;
 
     // ----- Portal cautivo -----------------------------------------
-    // Usando punteros a objetos del heap para no consumir RAM si el portal
-    // nunca se usa. Se crean una sola vez y permanecen hasta reinicio.
+    // Punteros al heap para no consumir RAM si el portal nunca se usa.
+    // Se crean UNA sola vez (con sus rutas) y se reutilizan con
+    // begin()/stop(); nunca se destruyen.
     class DNSServer*   _dns    = nullptr;
     class WebServer*   _server = nullptr;
 
-    String _scanCache;   // resultado del scan de redes WiFi cacheado en HTML
+    bool     _portalActivo        = false; // AP + DNS + HTTP atendiendo
+    bool     _portalConSTA        = false; // portal en AP_STA reintentando credenciales
+    bool     _ntpTimeoutConectado = false; // conectado pero NTP no respondió (evita re-ciclo)
+    bool     _cierrePendiente     = false; // cierre diferido programado desde un handler
+    uint32_t _tCierrePortal       = 0;     // millis() a partir del cual cerrar
+
+    String _scanCache;   // resultado del último scan de redes, ya como <li>...
 
     // ----- Métodos privados ----------------------------------------
     void _cargarCredenciales();
     void _iniciarConexion();
     void _iniciarPortal();
-    void _cerrarPortal();
+    void _detenerPortal();               // softAPdisconnect + stop de server/dns
+    void _atenderPortal();               // dns + http + recolección del scan async
+    void _lanzarScan();                  // scan async (nunca bloquea)
+    void _regenerarScanCache(int n);     // arma los <li> desde los resultados
     void _marcarHoraValida();
 
     // Handlers del WebServer

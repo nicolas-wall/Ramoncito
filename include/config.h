@@ -57,11 +57,14 @@ static const uint8_t  BUZZER_LEDC_RES   = 8;     // bits de resolución
 static const bool     SONIDO_HABILITADO_DEFAULT = true; // sin buzzer no molesta
 
 // ----- Cerebro Tamagotchi (mood, doc 02/03) --------------------
-// Decaimiento por minuto (escalado por TIME_SCALE):
-static const uint8_t  MOOD_DECAY_ENERGIA_PM   = 2;  // energía -2/min
-static const uint8_t  MOOD_DECAY_FELICIDAD_PM = 1;  // felicidad -1/min
-static const uint8_t  MOOD_SUBE_ABURRIM_PM    = 3;  // aburrimiento +3/min sin interacción
-static const uint32_t MOOD_TICK_MS            = 60000; // 1 min (dividido por TIME_SCALE)
+// Decaimiento POR TICK de 5 minutos (escalado por TIME_SCALE).
+// (El tick de 1 min original agotaba la energía en <1 h — demasiado
+// agresivo para un juguete de escritorio; verificado en uso real.)
+static const uint8_t  MOOD_DECAY_ENERGIA_PM   = 2;  // energía -2/tick (≈ -24/hora)
+static const uint8_t  MOOD_DECAY_FELICIDAD_PM = 1;  // felicidad -1/tick
+static const uint8_t  MOOD_SUBE_ABURRIM_PM    = 2;  // aburrimiento +2/tick
+static const uint8_t  MOOD_RECUPERA_ENERGIA_PT = 3; // energía +3/tick mientras duerme/descansa
+static const uint32_t MOOD_TICK_MS            = 5UL * 60UL * 1000UL; // 5 min (dividido por TIME_SCALE)
 // Valores iniciales si no hay nada guardado:
 static const uint8_t  MOOD_INI_FELICIDAD = 50;
 static const uint8_t  MOOD_INI_ENERGIA   = 80;

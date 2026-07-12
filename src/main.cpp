@@ -211,7 +211,11 @@ void loop() {
 
     // Módulos de fondo
     net.update(ahora);
-    mood.update(ahora);
+    // Descansando = sueño nocturno o siesta por agotamiento (cara DORMIDO):
+    // en vez de decaer, recupera energía de a poco.
+    bool descansando = (appState == AppState::SLEEPING) ||
+                       (appState == AppState::IDLE && idleExprActual == Expression::DORMIDO);
+    mood.update(ahora, descansando);
     sound.update(ahora);
 
     // Hora recién validada -> decaimiento offline (una sola vez)

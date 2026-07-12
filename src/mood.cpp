@@ -115,7 +115,7 @@ void Mood::begin() {
 //  El tick de decaimiento ocurre cada MOOD_TICK_MS / TIME_SCALE ms.
 // ─────────────────────────────────────────────────────────────
 
-void Mood::update(uint32_t now) {
+void Mood::update(uint32_t now, bool descansando) {
     // Intervalo entre ticks de decaimiento (escalado para pruebas)
     const uint32_t tickInterval = MOOD_TICK_MS / TIME_SCALE;
 
@@ -123,18 +123,23 @@ void Mood::update(uint32_t now) {
     if ((now - _lastTickMs) >= tickInterval) {
         _lastTickMs = now;
 
-        // Decaimiento de energía
-        _energy = _subSat(_energy, MOOD_DECAY_ENERGIA_PM);
+        if (descansando) {
+            // Dormir recarga energía; el resto queda congelado.
+            _energy = _addSat(_energy, MOOD_RECUPERA_ENERGIA_PT);
+        } else {
+            // Decaimiento de energía
+            _energy = _subSat(_energy, MOOD_DECAY_ENERGIA_PM);
 
-        // Decaimiento de felicidad (doble si el aburrimiento es alto)
-        uint8_t felicidadDecay = MOOD_DECAY_FELICIDAD_PM;
-        if (_boredom > 70) {
-            felicidadDecay = felicidadDecay * 2;
+            // Decaimiento de felicidad (doble si el aburrimiento es alto)
+            uint8_t felicidadDecay = MOOD_DECAY_FELICIDAD_PM;
+            if (_boredom > 70) {
+                felicidadDecay = felicidadDecay * 2;
+            }
+            _happiness = _subSat(_happiness, felicidadDecay);
+
+            // Aumento del aburrimiento
+            _boredom = _addSat(_boredom, MOOD_SUBE_ABURRIM_PM);
         }
-        _happiness = _subSat(_happiness, felicidadDecay);
-
-        // Aumento del aburrimiento
-        _boredom = _addSat(_boredom, MOOD_SUBE_ABURRIM_PM);
 
         _dirty = true;
     }
@@ -261,8 +266,8 @@ void Mood::applyOfflineDecay(time_t nowEpoch) {
         dt = (time_t)OFFLINE_DECAY_TOPE_S;
     }
 
-    // Convertir a minutos para aplicar las mismas tasas por minuto
-    uint32_t minutos = (uint32_t)(dt / 60);
+    // Convertir a ticks (las tasas son por tick de MOOD_TICK_MS)
+    uint32_t minutos = (uint32_t)(dt / (time_t)(MOOD_TICK_MS / 1000));
 
     if (minutos == 0) {
         return;
@@ -280,8 +285,8 @@ void Mood::applyOfflineDecay(time_t nowEpoch) {
     _energy    = _subSat(_energy,    engDecayTotal);
     _boredom   = _addSat(_boredom,   borRiseTotal);
 
-    Serial.printf("[mood] decaimiento offline: %u min apagado -> F:%u E:%u A:%u\n",
-                  minutos, _happiness, _energy, _boredom);
+    Serial.printf("[mood] decaimiento offline: %u ticks (de %lu s) apagado -> F:%u E:%u A:%u\n",
+                  minutos, (unsigned long)(MOOD_TICK_MS / 1000), _happiness, _energy, _boredom);
 
     // Actualizar epoch de referencia al tiempo actual y guardar
     _lastKnownEpoch = nowEpoch;
