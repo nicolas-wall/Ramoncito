@@ -135,7 +135,7 @@ El ESP32-S3 tiene sensado capacitivo nativo en varios pines. GPIO3 (D2 en el XIA
 uint32_t valor = touchRead(GPIO3);
 ```
 
-El valor cae cuando hay contacto (más capacitancia → carga más lenta). El umbral exacto depende del hardware montado y hay que calibrarlo.
+**OJO — comportamiento del ESP32-S3** (verificado en hardware): a diferencia del ESP32 original (donde el valor cae al tocar), en el S3 `touchRead()` devuelve valores grandes (~38000 en este hardware) que **AUMENTAN al tocar**. La detección es `valor > baseline × 1.15`. El umbral exacto depende del hardware montado y hay que calibrarlo.
 
 **Cómo armar el sensor:**
 

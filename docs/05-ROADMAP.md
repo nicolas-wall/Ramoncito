@@ -60,19 +60,14 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Definir struct `EyeParams` según doc 03 §1: centro, tamaño, radio de esquinas, párpados con pendiente, offsets de mirada
-- [ ] Dibujar función `renderEyes(Eye left, Eye right)` con U8g2 usando elipses/rectángulos redondeados
-- [ ] Implementar sistema de interpolación lineal (lerp) para transiciones suaves entre estados
-- [ ] Implementar parpadeo automático: timer aleatorio 3-6 s, animación de cierre/apertura en ~150 ms
-- [ ] Implementar mirada errante: target aleatorio cada 2-5 s, iris se desplaza suavemente
-- [ ] Definir al menos 5 expresiones como conjuntos de parámetros objetivo:
-  - [ ] `IDLE` — ojos neutros semi-abiertos
-  - [ ] `HAPPY` — ojos curvados hacia arriba, más abiertos
-  - [ ] `SAD` — párpados caídos hacia el centro
-  - [ ] `SURPRISED` — ojos muy abiertos, iris pequeño
-  - [ ] `ANGRY` — párpados inclinados hacia el centro, ceño
-- [ ] Verificar que las transiciones entre expresiones no tienen saltos bruscos
-- [ ] Mantener ~30 fps con todo el motor activo
+- [x] Definir struct `EyeParams` según doc 03 §1 — en `src/face.h/cpp`
+- [x] Dibujar función de render con U8g2 (drawRBox + párpados como polígonos negros)
+- [x] Implementar sistema de interpolación (ease-out `cur += (tgt-cur)*t`)
+- [x] Implementar parpadeo automático: timer aleatorio 2-6 s, ~5 frames
+- [x] Implementar mirada errante: offset aleatorio ±5 px cada 3-8 s + micro-movimiento senoidal
+- [x] Definir expresiones como conjuntos de parámetros objetivo — **las 9 del doc 03** (NEUTRAL, FELIZ, TRISTE, ENOJADO, SORPRENDIDO, ABURRIDO, DORMIDO, SOSPECHOSO, AMOR)
+- [x] Verificar que las transiciones entre expresiones no tienen saltos bruscos
+- [x] Mantener ~30 fps con todo el motor activo — **31 fps medidos en hardware**
 
 **Sabés que está lista cuando:** el personaje en idle se ve "vivo" (parpadea, mira, respira) y cambiar de expresión por código produce una transición fluida sin glitches.
 
@@ -86,16 +81,16 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Configurar GPIO1 y GPIO2 como `INPUT_PULLUP`
-- [ ] Implementar debounce por software (filtro de 20-50 ms) para ambos botones
-- [ ] Leer touch capacitivo con `touchRead(3)` y establecer umbral baseline en el boot (promedio de 10 lecturas)
-- [ ] Implementar detección de toque: valor < (baseline × 0.7) durante al menos 3 lecturas consecutivas
-- [ ] Mapear entradas a reacciones:
-  - [ ] Botón A (D0) → expresión `SURPRISED` durante 1.5 s, luego vuelve a idle
-  - [ ] Botón B (D1) → expresión `HAPPY` durante 1.5 s, luego vuelve a idle
-  - [ ] Touch (D2) → expresión `AMOR/MIMO` (ojos grandes casi circulares, doc 03) durante 2 s
-- [ ] Loguear cada evento por serial para verificar detección
-- [ ] Verificar que no hay doble-disparo ni pérdida de eventos bajo pulsación rápida
+- [x] Configurar GPIO1 y GPIO2 como `INPUT_PULLUP`
+- [x] Implementar debounce por software (30 ms) para ambos botones
+- [x] Leer touch con `touchRead(3)` + baseline al boot (50 lecturas, descarte de outliers) — baseline medida: 38063
+- [x] Implementar detección de toque: **valor > baseline × 1.15** (en el S3 el valor SUBE al tocar, corregido del plan original) con 3 lecturas de confirmación e histéresis para soltar
+- [x] Mapear entradas a reacciones (+ overlay en pantalla con el nombre del pin, para identificar botones físicos):
+  - [x] Botón A (D0/GPIO1) → `SORPRENDIDO` 1.5 s
+  - [x] Botón B (D1/GPIO2) → `FELIZ` 1.5 s
+  - [x] Touch (D2/GPIO3) → `AMOR` mientras dure la caricia (mín. 2 s)
+- [x] Loguear cada evento por serial para verificar detección
+- [ ] Verificar que no hay doble-disparo ni pérdida de eventos bajo pulsación rápida — **pendiente: prueba física del usuario**
 
 **Sabés que está lista cuando:** cada entrada dispara su reacción de forma confiable en 10 pruebas consecutivas sin falsos positivos ni rebotes.
 
