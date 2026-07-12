@@ -11,7 +11,8 @@ enum class InputEvent : uint8_t {
     BTN_A_PRESS,
     BTN_B_PRESS,
     TOUCH_START,
-    TOUCH_END
+    TOUCH_END,
+    COMBO_AB_3S   // ambos botones sostenidos >= 3 s (minijuego oculto, doc 04 §1)
 };
 
 class Input {
@@ -55,6 +56,12 @@ private:
 
     void _pollBtn(BtnState& btn, uint8_t pin, InputEvent evPress,
                   const char* label, uint32_t now);
+
+    // --- Combo secreto A+B sostenido (minijuego oculto) ---
+    uint32_t _comboStartMs;   // cuándo el segundo botón se sumó (0 = no corriendo)
+    bool     _comboEmitted;   // ya se emitió; esperar a soltar ambos para rearmar
+
+    void _pollCombo(uint32_t now);
 
     // --- Estado del touch capacitivo ---
     uint32_t _touchBaseline;    // línea base calculada en begin()

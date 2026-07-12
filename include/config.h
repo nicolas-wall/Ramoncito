@@ -7,7 +7,7 @@
 #include <Arduino.h>
 
 // ----- Versión ----------------------------------------------
-#define FW_VERSION "0.6.0-etapa6"
+#define FW_VERSION "0.7.0-etapa7"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED     = 21;  // LED integrado, activo en BAJO

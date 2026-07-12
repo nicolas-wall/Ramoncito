@@ -13,6 +13,10 @@
 // Instancia global accesible desde main.cpp
 Input input;
 
+// Duración del combo A+B sostenido para el minijuego oculto (doc 04 §1).
+// Local a este módulo a propósito: config.h lo edita otro.
+static const uint32_t COMBO_AB_MS = 3000;
+
 // ============================================================
 //  Helpers de cola FIFO
 // ============================================================
@@ -45,6 +49,10 @@ void Input::begin() {
     // Estado inicial de botones (no presionados, HIGH por pull-up)
     _btnA = { false, true, 0 };
     _btnB = { false, true, 0 };
+
+    // Estado inicial del combo A+B
+    _comboStartMs = 0;
+    _comboEmitted = false;
 
     // --- Autocalibración del touch ---
     // Tomar TOUCH_MUESTRAS_CALIB lecturas espaciadas ~10 ms,
@@ -136,6 +144,41 @@ void Input::_pollBtn(BtnState& btn, uint8_t pin, InputEvent evPress,
 }
 
 // ============================================================
+//  _pollCombo() — combo secreto A+B sostenido >= COMBO_AB_MS
+// ============================================================
+//  El contador arranca cuando el segundo botón se suma (ambos
+//  debounced presionados). Se resetea si cualquiera se suelta.
+//  Emite COMBO_AB_3S una sola vez; para volver a emitir hay que
+//  soltar ambos y repetir el gesto. No suprime los BTN_x_PRESS
+//  normales (main resuelve la prioridad menú/combo).
+
+void Input::_pollCombo(uint32_t now) {
+    bool ambos = _btnA.debounced && _btnB.debounced;
+
+    if (!ambos) {
+        // Al menos uno suelto: resetear contador.
+        _comboStartMs = 0;
+        // Rearmar solo cuando AMBOS están sueltos.
+        if (!_btnA.debounced && !_btnB.debounced) {
+            _comboEmitted = false;
+        }
+        return;
+    }
+
+    // Ambos presionados: arrancar el contador si no estaba corriendo.
+    if (_comboStartMs == 0) {
+        _comboStartMs = now;
+    }
+
+    // Emitir una sola vez al cumplirse la duración.
+    if (!_comboEmitted && (now - _comboStartMs) >= COMBO_AB_MS) {
+        _comboEmitted = true;
+        _enqueue(InputEvent::COMBO_AB_3S);
+        Serial.println("[input] COMBO A+B 3s");
+    }
+}
+
+// ============================================================
 //  _pollTouch() — muestreo y detección con confirmación
 // ============================================================
 
@@ -188,6 +231,7 @@ void Input::poll(uint32_t now) {
              "BTN_A (D0/GPIO1)", now);
     _pollBtn(_btnB, PIN_BTN_B, InputEvent::BTN_B_PRESS,
              "BTN_B (D1/GPIO2)", now);
+    _pollCombo(now);
     _pollTouch(now);
 }
 

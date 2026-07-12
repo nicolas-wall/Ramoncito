@@ -22,12 +22,13 @@
 #include "mood.h"
 #include "net.h"
 #include "menu.h"
+#include "pong.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 // ----- Máquina de estados global ------------------------------
-enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU };
+enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, PONG };
 static AppState appState = AppState::IDLE;
 
 static uint32_t menuHasta = 0;                 // auto-cierre del menú
@@ -99,6 +100,28 @@ static void despacharEventos() {
             continue;  // el touch no lo despierta (caricia mientras duerme, ok)
         }
 
+        // Combo secreto: entra al Pong desde IDLE/MENU/REACTING
+        // (de noche no — los botones ya dispararon la protesta)
+        if (ev == InputEvent::COMBO_AB_3S) {
+            if (appState == AppState::PONG) {
+                // Mismo combo para abandonar la partida
+                pong.exit();
+                appState = AppState::IDLE;
+                idleExprActual = mood.dominantExpression();
+                face.setExpression(idleExprActual);
+            } else if (appState != AppState::SLEEPING) {
+                sound.play(Melody::SORPRESA);
+                pong.enter();
+                appState = AppState::PONG;
+                Serial.println("[app] PONG! (combo secreto)");
+            }
+            continue;
+        }
+
+        // Durante el Pong los botones mueven la paleta (estado crudo),
+        // los eventos de presión se ignoran
+        if (appState == AppState::PONG) continue;
+
         // En el menú: cualquier botón lo cierra
         if (appState == AppState::MENU) {
             if (ev == InputEvent::BTN_A_PRESS || ev == InputEvent::BTN_B_PRESS) {
@@ -159,6 +182,17 @@ static void procesarComando(const char* cmd) {
         Serial.println("[cmd] portal forzado");
     } else if (cmd[0] == 'i') {
         imprimirEstado();
+    } else if (cmd[0] == 'g') {
+        // Entrar/salir del Pong (test sin botones físicos)
+        if (appState == AppState::PONG) {
+            pong.exit();
+            appState = AppState::IDLE;
+            face.setExpression(mood.dominantExpression());
+        } else {
+            pong.enter();
+            appState = AppState::PONG;
+        }
+        Serial.printf("[cmd] pong: %d\n", appState == AppState::PONG);
     } else if (cmd[0] == 'n') {
         // Alternar menú (equivale a apretar un botón)
         if (appState == AppState::MENU) {
@@ -248,6 +282,26 @@ void loop() {
 
     despacharEventos();
 
+    // Pong: lógica del juego y fin de partida
+    if (appState == AppState::PONG) {
+        pong.update(ahora, input.btnA(), input.btnB());
+        if (pong.done()) {
+            PongResult r = pong.result();
+            pong.exit();
+            if (r == PongResult::GANA_JUGADOR) {
+                // La mascota perdió: puchero/enojo
+                mood.apply(MoodEffect::JUGO_PONG_GANO_HUMANO);
+                sound.play(Melody::TRISTE);
+                reaccionar(Expression::ENOJADO, 3000, "");
+            } else {
+                // La mascota ganó: festeja burlona
+                mood.apply(MoodEffect::JUGO_PONG_GANO_CPU);
+                sound.play(Melody::FELIZ);
+                reaccionar(Expression::FELIZ, 3000, "");
+            }
+        }
+    }
+
     // Auto-cierre del menú
     if (appState == AppState::MENU && (int32_t)(ahora - menuHasta) >= 0) {
         appState = AppState::IDLE;
@@ -297,7 +351,9 @@ void loop() {
 
     // Render
     u8g2.clearBuffer();
-    if (appState == AppState::MENU) {
+    if (appState == AppState::PONG) {
+        pong.render(u8g2);
+    } else if (appState == AppState::MENU) {
         MenuData md;
         md.felicidad       = mood.happiness();
         md.energia         = mood.energy();

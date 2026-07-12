@@ -173,19 +173,20 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ### Tareas
 
-- [ ] Implementar detector de combo: botón A + botón B sostenidos simultáneamente durante 3 s
-- [ ] Crear módulo `pong.cpp` / `pong.h` separado del motor principal
-- [ ] Implementar campo de juego según doc 04 §2: área 128×55 px con marcador arriba, paletas 3×12 px, pelota de radio 2 px
-- [ ] Paleta izquierda (jugador): controlada por botón A (arriba) y B (abajo)
-- [ ] Paleta derecha (CPU): sigue la Y de la pelota con velocidad limitada (dificultad ajustable)
-- [ ] Física de la pelota: velocidad aumenta levemente con cada rebote en paleta
-- [ ] Marcador: primero en llegar a 5 gana; mostrado en la pantalla durante el juego
-- [ ] Al terminar la partida (narrativa doc 04 §5: la mascota ES la CPU):
-  - [ ] Jugador gana → la mascota se enoja / hace puchero + jingle "decepcionado"
-  - [ ] CPU gana → la mascota festeja burlona + fanfarria corta
-  - [ ] En ambos casos: `aburrimiento -= 40`
-- [ ] Presionar ambos botones durante el juego → salir al menú principal (personaje)
-- [ ] Verificar que el estado de humor se preserva durante y después del juego
+- [x] Implementar detector de combo A+B 3 s (`InputEvent::COMBO_AB_3S` en input.cpp, emisión única con rearme al soltar ambos)
+- [x] Crear módulo `pong.cpp` / `pong.h` separado del motor principal
+- [x] Campo según doc 04 §2: área 128×55, marcador arriba, paletas 3×12, pelota radio 2, línea central punteada
+- [x] Paleta jugador: botón A sube, botón B baja (estado mantenido)
+- [x] IA de la CPU con error aleatorio decayente y tabla de dificultad progresiva (1.8→3.0 px/f, error 10→2)
+- [x] Física: ángulo por punto de impacto ±60°, +6 %/rebote con tope 6.0, anti-doble-rebote
+- [x] Marcador a 5 con pantalla de resultado 2 s ("GANASTE 5-3" / "GANE YO!")
+- [x] Fin de partida (la mascota ES la CPU) — **verificado en hardware con partida completa**:
+  - [x] Jugador gana → puchero/enojo + jingle triste
+  - [x] CPU gana → festeja + fanfarria — `[mood] JUGO_PONG_GANO_CPU -> F:100 A:0` en el log
+  - [x] En ambos casos: `aburrimiento -= 40`
+- [x] Combo A+B durante el juego → abandona y vuelve al personaje
+- [x] El humor se preserva durante el juego y recibe el efecto al final
+- [ ] Playtest humano: partida real con botones (dificultad ganable, combo cómodo) — pendiente del usuario
 
 **Sabés que está lista cuando:** una partida completa a 5 puntos es jugable sin bugs, la IA presenta resistencia razonable, y la vuelta al personaje es inmediata y limpia.
 
