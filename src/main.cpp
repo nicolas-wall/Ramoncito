@@ -104,7 +104,8 @@ static void despacharEventos() {
             case InputEvent::BTN_B_PRESS:
                 mood.apply(MoodEffect::BTN_B);
                 sound.play(Melody::FELIZ);
-                reaccionar(Expression::FELIZ, REACCION_BTN_MS, "BTN B (D1/GPIO2)");
+                // Guiño: distinguible aunque el idle ya sea FELIZ
+                reaccionar(Expression::GUINO, REACCION_BTN_MS, "BTN B (D1/GPIO2)");
                 break;
             case InputEvent::TOUCH_START:
                 mood.apply(MoodEffect::CARICIA);

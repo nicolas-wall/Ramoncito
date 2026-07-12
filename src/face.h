@@ -9,7 +9,7 @@
 
 enum class Expression : uint8_t {
     NEUTRAL, FELIZ, TRISTE, ENOJADO, SORPRENDIDO,
-    ABURRIDO, DORMIDO, SOSPECHOSO, AMOR
+    ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO
 };
 
 // Parámetros de un ojo (doc 03 §1.1).

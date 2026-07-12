@@ -34,12 +34,13 @@ struct ExprDef {
 };
 
 // Orden: NEUTRAL, FELIZ, TRISTE, ENOJADO, SORPRENDIDO,
-//        ABURRIDO, DORMIDO, SOSPECHOSO, AMOR
-static const ExprDef EXPR_TABLE[9] = {
+//        ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO
+static const ExprDef EXPR_TABLE[10] = {
     // NEUTRAL   pTop  pBot  sTop  sBot | pTop  pBot  sTop  sBot |  w    h    r
     {             0,   0,    0,    0,     0,   0,    0,    0,     28,  22,   6 },
-    // FELIZ      párpado sup alto (8), sin pendiente, w/h=28/18, r=9
-    {             8,   0,    0,    0,     8,   0,    0,    0,     28,  18,   9 },
+    // FELIZ      párpado INFERIOR alto → medialunas hacia arriba "^^"
+    //            (con pTop alto se leía como ojos entrecerrados/dormilones)
+    {             0,   9,    0,    0,     0,   9,    0,    0,     28,  20,  10 },
     // TRISTE     pTop=3, slopeTop izq=-4, der=+4
     {             3,   0,   -4,    0,     3,   0,   +4,    0,     26,  20,   5 },
     // ENOJADO    pTop=7, slopeTop izq=+5, der=-5
@@ -54,6 +55,8 @@ static const ExprDef EXPR_TABLE[9] = {
     {             5,   0,   +3,    0,    10,   0,   -3,    0,     28,  22,   5 },
     // AMOR/MIMO  ojo casi circular w=h=26, r=13
     {             0,   0,    0,    0,     0,   0,    0,    0,     26,  26,  13 },
+    // GUINO      ojo izq cerrado (párpados que colapsan), der feliz "^"
+    {            10,  10,    0,    0,     0,   9,    0,    0,     28,  22,   9 },
 };
 
 // ----------------------------------------------------------------
@@ -77,7 +80,7 @@ static void exprToTargets(Expression e,
                           EyeParams &lt, EyeParams &rt)
 {
     uint8_t idx = (uint8_t)e;
-    if (idx >= 9) idx = 0;
+    if (idx >= 10) idx = 0;
     const ExprDef &d = EXPR_TABLE[idx];
 
     lt.cx       = EYE_LEFT_CX;
