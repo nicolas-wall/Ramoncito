@@ -158,7 +158,7 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 - [x] Botón durante el sueño → `ENOJADO` 2.5 s ("GRRR... dejame dormir") + efecto de humor, y vuelve a dormir — verificado con hora forzada
 - [x] `WiFi.disconnect()` + `WIFI_OFF` después de sincronizar
 - [x] Simulación de hora por serial (`h 23` / `h -1`) — **verificado: duerme a las 23, despierta a las 8**
-- [ ] Prueba de NTP real — pendiente: el usuario debe conectarse al AP `espToy-setup` desde el teléfono y configurar su WiFi (o usar el botón de hora del teléfono)
+- [x] Prueba de NTP real — **conectado a la red del usuario y hora local sincronizada (16:55 12/07/2026)**; el portal se cierra solo al lograrlo. Reintentos AP_STA cada 30 s si la conexión falla
 - [ ] (Opcional, descartado por ahora) Mostrar hora en pantalla
 
 **Sabés que está lista cuando:** con hora forzada a las 23:00 por serial, el personaje duerme y ronca. Al presionar un botón, se enoja brevemente y vuelve a dormir.
