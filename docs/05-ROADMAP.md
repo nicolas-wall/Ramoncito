@@ -25,8 +25,8 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
   ```
 - [x] Escribir `main.cpp` con blink del LED integrado + `Serial.println` en el loop
 - [x] Compilar sin errores (`pio run`) — RAM 5.6 %, Flash 7.6 %
-- [ ] Flashear (`pio run --target upload`) — pendiente: conectar el XIAO por USB-C
-- [ ] Abrir monitor serial y verificar salida
+- [x] Flashear (`pio run --target upload`) — COM5, USB nativo, 10 s, hash verificado
+- [x] Abrir monitor serial y verificar salida — ticks 1/s, uptime OK, heap estable en 372660 bytes
 
 **Sabés que está lista cuando:** el monitor serial muestra mensajes periódicos (ej. `"espToy boot OK — tick N"`) y el LED parpadea.
 
