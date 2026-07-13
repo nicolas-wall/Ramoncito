@@ -2,31 +2,38 @@
 //  espToy — net.cpp
 //  Implementación del módulo de red.
 //
+//  FILOSOFÍA: el AP de setup "espToy-setup" debe estar SIEMPRE encendido y
+//  visible desde el segundo 1, pase lo que pase con la conexión STA. Con
+//  credenciales, el arranque va DIRECTO a PORTAL en AP_STA (softAP + DNS +
+//  HTTP atendiendo) y la STA se reintenta de fondo. El AP no se apaga nunca
+//  hasta que NTP confirme hora válida. Si nunca conecta, el AP queda
+//  encendido indefinidamente para que el usuario pueda configurar o dar la
+//  hora del teléfono.
+//
 //  Máquina de estados:
-//    SIN_CREDENCIALES → PORTAL (solo AP)
-//    CONECTANDO       → SINCRONIZANDO_NTP  (WL_CONNECTED antes de timeout)
-//    CONECTANDO       → PORTAL en AP_STA   (timeout con credenciales; el
-//                       portal atiende Y se reintenta WiFi.begin cada 180 s;
-//                       antes del portal se dan 3 intentos en STA puro)
-//    CONECTANDO       → REPOSO             (timeout de un resync: silencioso)
-//    PORTAL(AP_STA)   → SINCRONIZANDO_NTP  (un reintento conectó; el portal
-//                       SIGUE atendiendo hasta que NTP confirme)
-//    SINCRONIZANDO_NTP→ REPOSO             (hora válida; cierra portal si había)
-//    SINCRONIZANDO_NTP→ PORTAL             (timeout NTP con portal activo)
+//    begin() con credenciales → PORTAL (AP_STA, softAP arriba + STA de fondo)
+//    begin() sin credenciales → PORTAL (AP puro)
+//    PORTAL(AP_STA)   → SINCRONIZANDO_NTP  (la STA de fondo conectó; el portal
+//                       SIGUE atendiendo y el AP encendido hasta que NTP OK)
+//    SINCRONIZANDO_NTP→ REPOSO             (hora válida; cierra portal + AP off)
+//    SINCRONIZANDO_NTP→ PORTAL             (timeout NTP con portal activo:
+//                       conectado pero sin internet → usar hora del teléfono)
 //    PORTAL           → cierre DIFERIDO tras /settime (flag + timestamp,
-//                       procesado en update(); nunca dentro de un handler)
+//                       procesado en update(); nunca dentro de un handler).
+//                       Si quedan credenciales sin conectar, pasa a CONECTANDO
+//                       en modo silencioso (STA sola, ya sin AP).
+//    CONECTANDO       → SINCRONIZANDO_NTP  (silencioso post-/settime conectó)
+//    CONECTANDO       → REPOSO             (silencioso agotado, o resync fallido)
 //    REPOSO           → CONECTANDO         (resync diario NTP_RESYNC_MS)
 //
 //  El scan de redes es SIEMPRE asíncrono (WiFi.scanNetworks(true, true)):
 //  nunca se bloquea el loop, la cara sigue animando a 30 fps.
 //
-//  IMPORTANTE (estabilidad del AP en AP_STA): cada WiFi.begin() y cada
-//  scan cambian el canal de la radio y cortan los beacons del AP → si se
-//  encadenan, el AP "espToy-setup" se vuelve invisible. Por eso, con
-//  credenciales guardadas el scan NUNCA es automático (solo a pedido:
-//  /scan o raíz con caché vacía), los reintentos van cada 180 s con
-//  disconnect previo, y tras cada begin() hay 20 s sin scans para que
-//  la asociación tenga chance real de completarse.
+//  IMPORTANTE (estabilidad del AP en AP_STA): cada WiFi.begin() y cada scan
+//  cambian el canal de la radio y cortan los beacons del AP unos ms. Por eso
+//  con credenciales el scan NUNCA es automático (solo a pedido del botón del
+//  portal) y el reintento de STA de fondo va espaciado (cada 30 s), de modo
+//  que el AP esté en el aire la enorme mayoría del tiempo.
 //
 //  El portal cautivo responde también a las sondas de Android/iOS para
 //  que el teléfono muestre la notificación de "iniciar sesión".
@@ -45,12 +52,10 @@ Net net;
 
 // Constantes internas del módulo
 static const uint32_t NTP_TIMEOUT_MS       = 15000;  // 15 s esperando NTP
-static const uint32_t REINTENTO_STA_MS     = 180000; // reintento de conexión c/180 s
-                                                     // (muy espaciado: cada begin() en AP_STA
-                                                     // corta los beacons del AP un rato; ya
-                                                     // dimos 3 intentos STA puro antes, así
-                                                     // que aquí el AP prima sobre reconectar)
-static const uint8_t  MAX_INTENTOS_STA_INICIALES = 3; // reintentos STA puro pre-portal
+static const uint32_t REINTENTO_STA_MS     = 30000;  // reintento de STA de fondo c/30 s
+                                                     // (el AP queda fijo arriba; cada begin()
+                                                     // solo corta beacons unos ms, así que
+                                                     // el AP sigue visible casi todo el tiempo)
 static const uint32_t CIERRE_PORTAL_MS     = 3000;   // demora del cierre tras /settime
 static const uint32_t SCAN_GUARDA_BEGIN_MS = 20000;  // ventana de asociación tranquila:
                                                      // sin scans hasta 20 s tras un begin()
@@ -69,14 +74,37 @@ static const IPAddress AP_SUBNET           (255, 255, 255, 0);
 //  begin() — llamar desde setup()
 // ================================================================
 void Net::begin() {
+    // ---- Modo SOLO-AP (WIFI_INTENTAR_STA == false) -----------------
+    // No se intenta conectar a ninguna red: se levanta SOLO el AP de setup,
+    // estable y permanente, y la hora llega por /settime desde el teléfono.
+    // Sin cargar credenciales, sin WiFi.begin(), sin scans, sin reintentos.
+    if (!WIFI_INTENTAR_STA) {
+        Serial.println("[net] modo SOLO-AP (WIFI_INTENTAR_STA=false) → AP puro estable, sin STA");
+        _iniciarPortal();   // _ssid vacío ⇒ _portalConSTA=false ⇒ WIFI_AP puro
+        return;
+    }
+
+    // ---- Modo STA/NTP (WIFI_INTENTAR_STA == true) ------------------
     _cargarCredenciales();
 
+    // SIEMPRE arrancar el portal desde el segundo 1:
+    //  - con credenciales → AP_STA: softAP visible + STA reintentando de fondo.
+    //  - sin credenciales → AP puro.
+    // El AP no se apaga hasta que NTP confirme hora válida (o nunca, si no
+    // conecta: el usuario lo necesita para configurar / dar la hora).
     if (_ssid.length() > 0) {
-        _iniciarConexion();
+        Serial.println("[net] credenciales presentes → portal AP_STA (AP visible + STA de fondo)");
+        // Disparamos ya el primer intento STA; _iniciarPortal() añade luego el
+        // AP con WiFi.mode(WIFI_AP_STA) sin cancelarlo. Los reintentos de
+        // fondo (cada 30 s) los maneja el estado PORTAL.
+        WiFi.begin(_ssid.c_str(), _pass.c_str());
+        _tInicioConexion = millis();
+        _tUltimoBegin    = _tInicioConexion;
+        _huboBegin       = true;
     } else {
-        Serial.println("[net] sin credenciales guardadas → iniciando portal");
-        _iniciarPortal();
+        Serial.println("[net] sin credenciales guardadas → iniciando portal (AP)");
     }
+    _iniciarPortal();
 }
 
 // ================================================================
@@ -86,6 +114,10 @@ void Net::update(uint32_t now) {
     switch (_estado) {
 
         // ---- CONECTANDO ------------------------------------------
+        // Sin AP. Solo se llega acá por dos vías, ambas post-portal:
+        //  (a) resync diario desde REPOSO (_iniciarConexion, hora ya válida);
+        //  (b) modo silencioso tras /settime (portal cerrado, STA sola).
+        // El arranque inicial NUNCA entra acá: va directo a PORTAL (AP_STA).
         case Estado::CONECTANDO: {
             wl_status_t st = WiFi.status();
             if (st == WL_CONNECTED) {
@@ -94,7 +126,6 @@ void Net::update(uint32_t now) {
                               WiFi.localIP().toString().c_str());
                 _ultimoError = "";            // conexión OK → limpiar error
                 _reintentoSilencioso = false;
-                _intentosStaIniciales = 0;    // próximo ciclo arranca limpio
                 // Configurar zona horaria y disparar NTP
                 configTime(TZ_OFFSET_S, 0, NTP_SERVER);
                 _tInicioNTP = now;
@@ -110,8 +141,8 @@ void Net::update(uint32_t now) {
                         Serial.printf("[net] status tras reintento: %d\n", (int)st);
                         s_statusLogueado = true;
                     }
-                    // Modo silencioso (post-portal): reintentar cada REINTENTO_STA_MS
-                    // sin volver a abrir el portal, con tope de intentos.
+                    // Modo silencioso (post-/settime): reintentar cada
+                    // REINTENTO_STA_MS sin AP, con tope de intentos.
                     if ((now - _tUltimoBegin) >= REINTENTO_STA_MS) {
                         if (_reintentosRestantes == 0) {
                             Serial.println("[net] reintentos silenciosos agotados — WiFi off");
@@ -133,7 +164,7 @@ void Net::update(uint32_t now) {
                         }
                     }
 
-                } else if (_horaValida) {
+                } else {
                     // Falló un resync diario: NO molestar con el portal,
                     // el equipo ya funciona con hora. Reintentar en 24 h.
                     Serial.printf("[net] resync: timeout de conexión a '%s' — reintento en 24 h\n",
@@ -142,30 +173,6 @@ void Net::update(uint32_t now) {
                     WiFi.mode(WIFI_OFF);
                     _tUltimaSync = now;   // corre la ventana del próximo resync
                     _estado = Estado::REPOSO;
-
-                } else if (_intentosStaIniciales < MAX_INTENTOS_STA_INICIALES) {
-                    // Conexión inicial del arranque: antes de recurrir al portal
-                    // damos hasta 3 reintentos en STA PURO (sin AP, mismo canal,
-                    // sin conflicto de radio) para routers lentos/erráticos.
-                    _intentosStaIniciales++;
-                    Serial.printf("[net] reintento STA puro %u/%u a '%s'\n",
-                                  _intentosStaIniciales, MAX_INTENTOS_STA_INICIALES,
-                                  _ssid.c_str());
-                    WiFi.disconnect(false);  // limpiar el estado del supplicant
-                    WiFi.begin(_ssid.c_str(), _pass.c_str());
-                    _tInicioConexion = now;  // reiniciar el timeout del intento
-                    _tUltimoBegin    = now;
-                    _huboBegin       = true;
-                    // seguimos en WIFI_STA y en estado CONECTANDO
-
-                } else {
-                    // Agotados los 3 intentos STA puro: portal en AP_STA que
-                    // informa el error y sigue reintentando la STA cada 180 s.
-                    Serial.printf("[net] timeout de conexión a '%s' tras %u intentos → portal (AP_STA)\n",
-                                  _ssid.c_str(), _intentosStaIniciales);
-                    _ultimoError = "No pude conectarme a '" + _ssid +
-                                   "'. Revisá la clave. Ojo: el ESP32 solo ve redes de 2.4 GHz (no 5 GHz).";
-                    _iniciarPortal();
                 }
             }
             break;
@@ -205,6 +212,7 @@ void Net::update(uint32_t now) {
                     _ultimoError = "Me conecté a '" + _ssid +
                                    "' pero no pude obtener la hora de internet. "
                                    "Podés usar la hora de este teléfono.";
+                    // El AP nunca se apagó: seguimos atendiendo el portal.
                     _estado = Estado::PORTAL;
                 } else {
                     Serial.println("[net] advertencia: timeout esperando NTP — sin hora confiable");
@@ -276,11 +284,12 @@ void Net::update(uint32_t now) {
                         Serial.printf("[net] status tras reintento: %d\n", (int)st);
                         s_statusLogueado = true;
                     }
-                    // Reintento cada 180 s (muy espaciado para que el AP mantenga
-                    // beacons estables; no pisar un scan en curso)
+                    // Reintento de STA de fondo cada 30 s. El AP queda fijo
+                    // arriba; cada begin() solo corta beacons unos ms.
+                    // No pisar un scan en curso.
                     if ((now - _tUltimoReintento) >= REINTENTO_STA_MS &&
                         WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
-                        Serial.printf("[net] reintento de conexión a '%s' (portal activo)\n",
+                        Serial.printf("[net] reintento de conexión a '%s' (portal activo, AP fijo)\n",
                                       _ssid.c_str());
                         WiFi.disconnect(false);  // limpiar el estado del supplicant
                         WiFi.begin(_ssid.c_str(), _pass.c_str());
@@ -430,24 +439,34 @@ void Net::_marcarHoraValida() {
 // ================================================================
 void Net::_iniciarPortal() {
     // Con credenciales guardadas el portal corre en AP_STA para poder
-    // seguir reintentando la conexión mientras el usuario configura.
+    // seguir reintentando la conexión de fondo mientras el usuario configura.
+    // El softAP se levanta SIEMPRE y no se apaga hasta que NTP confirme.
     _portalConSTA = (_ssid.length() > 0);
 
+    // WIFI_AP_STA preserva el intento STA que begin() ya pudo haber lanzado.
     WiFi.mode(_portalConSTA ? WIFI_AP_STA : WIFI_AP);
     WiFi.softAPConfig(AP_IP, AP_IP, AP_SUBNET);
     WiFi.softAP(PORTAL_AP_SSID);   // AP abierto, sin clave
 
     Serial.printf("[net] portal cautivo iniciado — SSID: '%s'  IP: %s  modo: %s\n",
                   PORTAL_AP_SSID, AP_IP.toString().c_str(),
-                  _portalConSTA ? "AP_STA (reintenta conexión)" : "AP");
+                  _portalConSTA ? "AP_STA (AP fijo + STA de fondo)" : "AP");
+
+    // Banner informativo mientras la STA de fondo aún no conectó.
+    if (_portalConSTA && _ultimoError.length() == 0) {
+        _ultimoError = "Intentando conectar a '" + _ssid +
+                       "' de fondo... Si no conecta, revisá la clave. "
+                       "Verificá que sea una red de 2.4 GHz — la de 5 GHz no sirve.";
+    }
 
     // Scan de redes ASÍNCRONO (resultados en _atenderPortal() vía
     // WiFi.scanComplete(); la cara nunca se congela).
-    // SOLO automático en portal puro AP: en AP_STA cada scan cambia de
-    // canal y corta los beacons del AP + pisa los reintentos de la STA.
-    // Con credenciales, el scan queda a pedido (/scan o raíz sin caché).
+    // SOLO automático en portal puro AP con STA habilitada: en AP_STA cada
+    // scan cambia de canal y corta los beacons del AP + pisa los reintentos.
+    // En modo SOLO-AP (WIFI_INTENTAR_STA=false) NUNCA se escanea: el AP debe
+    // quedar rock-solid y no hay red que elegir (la hora llega por /settime).
     _scanCache = "";
-    if (!_portalConSTA) _lanzarScan();
+    if (WIFI_INTENTAR_STA && !_portalConSTA) _lanzarScan();
 
     // DNS Server: redirige todo a la IP del AP
     if (!_dns) _dns = new DNSServer();
@@ -481,7 +500,7 @@ void Net::_iniciarPortal() {
 
     _cierrePendiente     = false;
     _ntpTimeoutConectado = false;
-    _tUltimoReintento    = millis();   // primer reintento STA a los 180 s
+    _tUltimoReintento    = millis();   // primer reintento STA de fondo a los 30 s
     _portalActivo        = true;
     _estado = Estado::PORTAL;
 }
@@ -516,12 +535,12 @@ void Net::_atenderPortal() {
         _regenerarScanCache(n);
         WiFi.scanDelete();
         Serial.printf("[net] scan completado: %d redes\n", n);
-    } else if (n == WIFI_SCAN_FAILED && _scanCache.length() == 0 &&
-               _ssid.length() == 0) {
-        // Relanzamiento automático SOLO sin credenciales (portal puro AP):
-        // en AP_STA los scans automáticos vuelven invisible al AP y pisan
-        // los reintentos de asociación. Con credenciales, el scan es solo
-        // a pedido (/scan o _handleRoot con caché vacía).
+    } else if (WIFI_INTENTAR_STA && n == WIFI_SCAN_FAILED &&
+               _scanCache.length() == 0 && _ssid.length() == 0) {
+        // Relanzamiento automático SOLO sin credenciales (portal puro AP)
+        // y con STA habilitada: en AP_STA los scans automáticos vuelven
+        // invisible al AP y pisan los reintentos. Con credenciales, el scan
+        // es solo a pedido. En modo SOLO-AP no se escanea nunca.
         _lanzarScan();
     }
 }
@@ -532,6 +551,10 @@ void Net::_atenderPortal() {
 //  un scan pisa el intento de asociación y corta los beacons del AP).
 // ================================================================
 void Net::_lanzarScan() {
+    // Modo SOLO-AP: NUNCA escanear (el AP puro debe quedar estable y no hay
+    // red que elegir). Gate duro que cubre todos los llamadores.
+    if (!WIFI_INTENTAR_STA) return;
+
     // Backoff: máximo un lanzamiento cada 10 s. En AP_STA, mientras la STA
     // intenta asociarse, scanComplete() devuelve FAILED y sin esta guarda
     // se relanza en cada frame (spam de log + radio ocupada).
@@ -613,26 +636,33 @@ String Net::_htmlPortal() {
 <body>
 <div class="card">
   <h1>espToy 🤖</h1>
-  <p class="sub">Configuración de red y hora</p>
 )rawhtml";
+
+    // Subtítulo según el modo
+    html += WIFI_INTENTAR_STA
+                ? String("  <p class=\"sub\">Configuración de red y hora</p>\n")
+                : String("  <p class=\"sub\">Modo sin WiFi — solo configurar hora</p>\n");
 
     // Banner de error de la última conexión (si lo hay)
     if (_ultimoError.length() > 0) {
         html += "<div class='banner'>" + _ultimoError + "</div>";
     }
 
-    html += R"rawhtml(
+    // Sección WiFi (elegir/guardar red): SOLO en modo STA/NTP. En modo SOLO-AP
+    // no hay red que elegir, así que se oculta y queda solo el botón de hora.
+    if (WIFI_INTENTAR_STA) {
+        html += R"rawhtml(
   <!-- Sección WiFi -->
   <form method="POST" action="/save">
     <label>Redes disponibles (tocá para seleccionar)</label>
     <ul id="redes">)rawhtml";
 
-    // Caché del scan async (o placeholder mientras se busca)
-    html += (_scanCache.length() > 0)
-                ? _scanCache
-                : String("<li><em>buscando redes…</em></li>");
+        // Caché del scan async (o placeholder mientras se busca)
+        html += (_scanCache.length() > 0)
+                    ? _scanCache
+                    : String("<li><em>buscando redes…</em></li>");
 
-    html += R"rawhtml(</ul>
+        html += R"rawhtml(</ul>
     <button type="button" class="btn btn-secondary btn-mini" onclick="rescan()">Buscar redes de nuevo</button>
     <label for="ssid">Nombre de red (SSID)</label>
     <input type="text" id="ssid" name="ssid" placeholder="Mi Red WiFi" autocomplete="off">
@@ -643,10 +673,13 @@ String Net::_htmlPortal() {
   </form>
 
   <hr class="divider">
+)rawhtml";
+    }
 
+    html += R"rawhtml(
   <!-- Sección hora del teléfono -->
   <p style="font-size:0.85rem;color:#aaa;margin-bottom:12px">
-    ¿Sin internet? Podés darle la hora directamente desde este teléfono.
+    Poné en hora tu espToy directamente desde este teléfono.
   </p>
   <button class="btn btn-secondary" onclick="enviarHora()">
     Usar la hora de este teléfono

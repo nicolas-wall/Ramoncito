@@ -381,10 +381,9 @@ void loop() {
             u8g2.setFont(u8g2_font_5x7_tf);
             u8g2.drawStr(2, 63, reaccionLabel);
         }
-        if (net.portalActive()) {
-            u8g2.setFont(u8g2_font_4x6_tf);
-            u8g2.drawStr(2, 6, "WiFi: espToy-setup");
-        }
+        // La leyenda del WiFi ya NO va sobre la cara (interfería con las
+        // animaciones). El estado de conexión y el AP de setup se ven en
+        // el menú (cualquier botón).
     }
     u8g2.sendBuffer();
 

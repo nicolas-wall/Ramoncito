@@ -80,6 +80,12 @@ static const int  HORA_DESPERTAR = 7;   // ...hasta las 07:00
 static const long TZ_OFFSET_S    = -3L * 3600L;  // Argentina (UTC-3, sin DST)
 
 // ----- WiFi / NTP / Portal --------------------------------------
+// false = no intentar conectarse a ninguna red; solo levantar el AP de setup
+//         (espToy-setup) para dar la hora desde el teléfono. Ideal si el router
+//         es errático o de 5 GHz. true = intentar conectar a las credenciales
+//         guardadas y sincronizar por NTP.
+static const bool     WIFI_INTENTAR_STA = false;
+
 // 22 s: en modo STA puro (primer intento), asociar + DHCP en un router
 // 2.4 GHz congestionado puede tardar 15-20 s. Con 10 s se vencía y caía
 // al portal AP_STA (donde el AP se vuelve inestable). Darle tiempo al
