@@ -81,6 +81,11 @@ private:
     uint8_t  _reintentosRestantes  = 0;     // tope de reintentos silenciosos
     uint32_t _tUltimoReintento     = 0;     // último WiFi.begin() del portal AP_STA
 
+    // Reintentos en STA PURO (sin AP) antes de abrir el portal, SOLO para la
+    // conexión inicial del arranque (routers lentos/erráticos). El resync
+    // diario no los usa: si falla va directo a REPOSO. Se resetea al conectar.
+    uint8_t  _intentosStaIniciales = 0;     // 0..3
+
     // Mensaje de error a mostrar en el portal (vacío = sin error)
     String _ultimoError;
 

@@ -80,7 +80,11 @@ static const int  HORA_DESPERTAR = 7;   // ...hasta las 07:00
 static const long TZ_OFFSET_S    = -3L * 3600L;  // Argentina (UTC-3, sin DST)
 
 // ----- WiFi / NTP / Portal --------------------------------------
-static const uint32_t WIFI_TIMEOUT_MS   = 10000;
+// 22 s: en modo STA puro (primer intento), asociar + DHCP en un router
+// 2.4 GHz congestionado puede tardar 15-20 s. Con 10 s se vencía y caía
+// al portal AP_STA (donde el AP se vuelve inestable). Darle tiempo al
+// primer intento limpio es lo que más mejora la conexión.
+static const uint32_t WIFI_TIMEOUT_MS   = 22000;
 static const char*    NTP_SERVER        = "pool.ntp.org";
 static const uint32_t NTP_RESYNC_MS     = 24UL * 3600UL * 1000UL; // 1 vez por día
 static const char*    PORTAL_AP_SSID    = "espToy-setup";

@@ -6,7 +6,8 @@
 //    SIN_CREDENCIALES → PORTAL (solo AP)
 //    CONECTANDO       → SINCRONIZANDO_NTP  (WL_CONNECTED antes de timeout)
 //    CONECTANDO       → PORTAL en AP_STA   (timeout con credenciales; el
-//                       portal atiende Y se reintenta WiFi.begin cada 30 s)
+//                       portal atiende Y se reintenta WiFi.begin cada 180 s;
+//                       antes del portal se dan 3 intentos en STA puro)
 //    CONECTANDO       → REPOSO             (timeout de un resync: silencioso)
 //    PORTAL(AP_STA)   → SINCRONIZANDO_NTP  (un reintento conectó; el portal
 //                       SIGUE atendiendo hasta que NTP confirme)
@@ -18,6 +19,14 @@
 //
 //  El scan de redes es SIEMPRE asíncrono (WiFi.scanNetworks(true, true)):
 //  nunca se bloquea el loop, la cara sigue animando a 30 fps.
+//
+//  IMPORTANTE (estabilidad del AP en AP_STA): cada WiFi.begin() y cada
+//  scan cambian el canal de la radio y cortan los beacons del AP → si se
+//  encadenan, el AP "espToy-setup" se vuelve invisible. Por eso, con
+//  credenciales guardadas el scan NUNCA es automático (solo a pedido:
+//  /scan o raíz con caché vacía), los reintentos van cada 180 s con
+//  disconnect previo, y tras cada begin() hay 20 s sin scans para que
+//  la asociación tenga chance real de completarse.
 //
 //  El portal cautivo responde también a las sondas de Android/iOS para
 //  que el teléfono muestre la notificación de "iniciar sesión".
@@ -36,10 +45,22 @@ Net net;
 
 // Constantes internas del módulo
 static const uint32_t NTP_TIMEOUT_MS       = 15000;  // 15 s esperando NTP
-static const uint32_t REINTENTO_STA_MS     = 30000;  // reintento de conexión c/30 s
+static const uint32_t REINTENTO_STA_MS     = 180000; // reintento de conexión c/180 s
+                                                     // (muy espaciado: cada begin() en AP_STA
+                                                     // corta los beacons del AP un rato; ya
+                                                     // dimos 3 intentos STA puro antes, así
+                                                     // que aquí el AP prima sobre reconectar)
+static const uint8_t  MAX_INTENTOS_STA_INICIALES = 3; // reintentos STA puro pre-portal
 static const uint32_t CIERRE_PORTAL_MS     = 3000;   // demora del cierre tras /settime
-static const uint32_t SCAN_GUARDA_BEGIN_MS = 5000;   // no scanear si begin() fue hace <5 s
-static const uint8_t  MAX_REINTENTOS_SILENCIOSOS = 10; // ~5 min y desiste
+static const uint32_t SCAN_GUARDA_BEGIN_MS = 20000;  // ventana de asociación tranquila:
+                                                     // sin scans hasta 20 s tras un begin()
+                                                     // (asociar puede tardar >10 s)
+static const uint8_t  MAX_REINTENTOS_SILENCIOSOS = 10; // ~10 min y desiste
+
+// Diagnóstico: loguear el wl_status_t una sola vez por reintento.
+// Códigos útiles: 0=IDLE, 1=NO_SSID_AVAIL (no ve la red), 4=CONNECT_FAILED
+// (clave mal), 5=CONNECTION_LOST, 6=DISCONNECTED.
+static bool s_statusLogueado = true;   // true = nada pendiente de loguear
 static const uint8_t  DNS_PORT             = 53;
 static const IPAddress AP_IP               (192, 168, 4, 1);
 static const IPAddress AP_SUBNET           (255, 255, 255, 0);
@@ -73,6 +94,7 @@ void Net::update(uint32_t now) {
                               WiFi.localIP().toString().c_str());
                 _ultimoError = "";            // conexión OK → limpiar error
                 _reintentoSilencioso = false;
+                _intentosStaIniciales = 0;    // próximo ciclo arranca limpio
                 // Configurar zona horaria y disparar NTP
                 configTime(TZ_OFFSET_S, 0, NTP_SERVER);
                 _tInicioNTP = now;
@@ -81,7 +103,14 @@ void Net::update(uint32_t now) {
             } else if ((now - _tInicioConexion) >= WIFI_TIMEOUT_MS) {
 
                 if (_reintentoSilencioso) {
-                    // Modo silencioso (post-portal): reintentar cada 30 s
+                    // Diagnóstico: resultado del último reintento, una sola vez,
+                    // recién cuando la ventana de asociación (20 s) ya venció.
+                    if (!s_statusLogueado &&
+                        (now - _tUltimoBegin) >= SCAN_GUARDA_BEGIN_MS) {
+                        Serial.printf("[net] status tras reintento: %d\n", (int)st);
+                        s_statusLogueado = true;
+                    }
+                    // Modo silencioso (post-portal): reintentar cada REINTENTO_STA_MS
                     // sin volver a abrir el portal, con tope de intentos.
                     if ((now - _tUltimoBegin) >= REINTENTO_STA_MS) {
                         if (_reintentosRestantes == 0) {
@@ -96,9 +125,11 @@ void Net::update(uint32_t now) {
                             _reintentosRestantes--;
                             Serial.printf("[net] reintento silencioso de conexión a '%s' (quedan %u)\n",
                                           _ssid.c_str(), _reintentosRestantes);
+                            WiFi.disconnect(false);  // limpiar el estado del supplicant
                             WiFi.begin(_ssid.c_str(), _pass.c_str());
                             _tUltimoBegin = now;
                             _huboBegin = true;
+                            s_statusLogueado = false;  // pendiente de diagnóstico
                         }
                     }
 
@@ -112,11 +143,26 @@ void Net::update(uint32_t now) {
                     _tUltimaSync = now;   // corre la ventana del próximo resync
                     _estado = Estado::REPOSO;
 
-                } else {
-                    // Falló la conexión inicial: portal en AP_STA que informa
-                    // el error y sigue reintentando la STA cada 30 s.
-                    Serial.printf("[net] timeout de conexión a '%s' → portal (AP_STA, sigo reintentando)\n",
+                } else if (_intentosStaIniciales < MAX_INTENTOS_STA_INICIALES) {
+                    // Conexión inicial del arranque: antes de recurrir al portal
+                    // damos hasta 3 reintentos en STA PURO (sin AP, mismo canal,
+                    // sin conflicto de radio) para routers lentos/erráticos.
+                    _intentosStaIniciales++;
+                    Serial.printf("[net] reintento STA puro %u/%u a '%s'\n",
+                                  _intentosStaIniciales, MAX_INTENTOS_STA_INICIALES,
                                   _ssid.c_str());
+                    WiFi.disconnect(false);  // limpiar el estado del supplicant
+                    WiFi.begin(_ssid.c_str(), _pass.c_str());
+                    _tInicioConexion = now;  // reiniciar el timeout del intento
+                    _tUltimoBegin    = now;
+                    _huboBegin       = true;
+                    // seguimos en WIFI_STA y en estado CONECTANDO
+
+                } else {
+                    // Agotados los 3 intentos STA puro: portal en AP_STA que
+                    // informa el error y sigue reintentando la STA cada 180 s.
+                    Serial.printf("[net] timeout de conexión a '%s' tras %u intentos → portal (AP_STA)\n",
+                                  _ssid.c_str(), _intentosStaIniciales);
                     _ultimoError = "No pude conectarme a '" + _ssid +
                                    "'. Revisá la clave. Ojo: el ESP32 solo ve redes de 2.4 GHz (no 5 GHz).";
                     _iniciarPortal();
@@ -223,15 +269,25 @@ void Net::update(uint32_t now) {
                 } else if (st != WL_CONNECTED) {
                     // Si se cayó la conexión, rehabilitar el ciclo de NTP
                     _ntpTimeoutConectado = false;
-                    // Reintento cada 30 s (no pisar un scan en curso)
+                    // Diagnóstico: resultado del último reintento, una sola vez,
+                    // recién cuando la ventana de asociación (20 s) ya venció.
+                    if (!s_statusLogueado &&
+                        (now - _tUltimoBegin) >= SCAN_GUARDA_BEGIN_MS) {
+                        Serial.printf("[net] status tras reintento: %d\n", (int)st);
+                        s_statusLogueado = true;
+                    }
+                    // Reintento cada 180 s (muy espaciado para que el AP mantenga
+                    // beacons estables; no pisar un scan en curso)
                     if ((now - _tUltimoReintento) >= REINTENTO_STA_MS &&
                         WiFi.scanComplete() != WIFI_SCAN_RUNNING) {
                         Serial.printf("[net] reintento de conexión a '%s' (portal activo)\n",
                                       _ssid.c_str());
+                        WiFi.disconnect(false);  // limpiar el estado del supplicant
                         WiFi.begin(_ssid.c_str(), _pass.c_str());
                         _tUltimoReintento = now;
                         _tUltimoBegin     = now;
                         _huboBegin        = true;
+                        s_statusLogueado  = false;  // pendiente de diagnóstico
                     }
 
                 } else if (_ntpTimeoutConectado) {
@@ -385,10 +441,13 @@ void Net::_iniciarPortal() {
                   PORTAL_AP_SSID, AP_IP.toString().c_str(),
                   _portalConSTA ? "AP_STA (reintenta conexión)" : "AP");
 
-    // Scan de redes ASÍNCRONO: los resultados se recogen en _atenderPortal()
-    // con WiFi.scanComplete(); la cara nunca se congela.
+    // Scan de redes ASÍNCRONO (resultados en _atenderPortal() vía
+    // WiFi.scanComplete(); la cara nunca se congela).
+    // SOLO automático en portal puro AP: en AP_STA cada scan cambia de
+    // canal y corta los beacons del AP + pisa los reintentos de la STA.
+    // Con credenciales, el scan queda a pedido (/scan o raíz sin caché).
     _scanCache = "";
-    _lanzarScan();
+    if (!_portalConSTA) _lanzarScan();
 
     // DNS Server: redirige todo a la IP del AP
     if (!_dns) _dns = new DNSServer();
@@ -422,7 +481,7 @@ void Net::_iniciarPortal() {
 
     _cierrePendiente     = false;
     _ntpTimeoutConectado = false;
-    _tUltimoReintento    = millis();   // primer reintento STA a los 30 s
+    _tUltimoReintento    = millis();   // primer reintento STA a los 180 s
     _portalActivo        = true;
     _estado = Estado::PORTAL;
 }
@@ -457,17 +516,20 @@ void Net::_atenderPortal() {
         _regenerarScanCache(n);
         WiFi.scanDelete();
         Serial.printf("[net] scan completado: %d redes\n", n);
-    } else if (n == WIFI_SCAN_FAILED && _scanCache.length() == 0) {
-        // Nunca hubo resultados (scan falló o no llegó a lanzarse):
-        // reintentar respetando la guarda del begin() reciente.
+    } else if (n == WIFI_SCAN_FAILED && _scanCache.length() == 0 &&
+               _ssid.length() == 0) {
+        // Relanzamiento automático SOLO sin credenciales (portal puro AP):
+        // en AP_STA los scans automáticos vuelven invisible al AP y pisan
+        // los reintentos de asociación. Con credenciales, el scan es solo
+        // a pedido (/scan o _handleRoot con caché vacía).
         _lanzarScan();
     }
 }
 
 // ================================================================
 //  _lanzarScan() — scan asíncrono de redes. No hace nada si ya hay
-//  un scan corriendo o si hubo un WiFi.begin() hace <5 s (en AP_STA
-//  un scan pisa el intento de asociación).
+//  un scan corriendo o si hubo un WiFi.begin() hace <20 s (en AP_STA
+//  un scan pisa el intento de asociación y corta los beacons del AP).
 // ================================================================
 void Net::_lanzarScan() {
     // Backoff: máximo un lanzamiento cada 10 s. En AP_STA, mientras la STA
@@ -636,6 +698,11 @@ function rescan() {
 // ================================================================
 
 void Net::_handleRoot() {
+    // Pedido explícito del usuario (abrió la página): si no hay caché de
+    // redes, intentar un scan. _lanzarScan() ya garantiza no molestar si
+    // hubo un begin() hace <20 s o hay un scan corriendo.
+    if (_scanCache.length() == 0) _lanzarScan();
+
     String html = _htmlPortal();
     _server->send(200, "text/html; charset=utf-8", html);
 }
