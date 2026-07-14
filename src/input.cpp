@@ -1,5 +1,5 @@
 // ============================================================
-//  input.cpp — Módulo de entradas: botones y touch capacitivo
+//  input.cpp — Módulo de entradas: botón y touch capacitivo
 //  Seeed XIAO ESP32-S3, framework Arduino
 //
 //  IMPORTANTE — comportamiento del touch en ESP32-S3:
@@ -10,20 +10,14 @@
 #include "input.h"
 #include "config.h"
 
-// Instancia global accesible desde main.cpp
 Input input;
 
-// Duración del combo A+B sostenido para el minijuego oculto (doc 04 §1).
-// Local a este módulo a propósito: config.h lo edita otro.
-static const uint32_t COMBO_AB_MS = 3000;
-
 // ============================================================
-//  Helpers de cola FIFO
+//  Cola FIFO
 // ============================================================
 
 void Input::_enqueue(InputEvent ev) {
     if (_qCount >= QUEUE_SIZE) {
-        // Cola llena: descartar el evento más viejo (avanzar head)
         _qHead = (_qHead + 1) % QUEUE_SIZE;
         _qCount--;
     }
@@ -33,43 +27,21 @@ void Input::_enqueue(InputEvent ev) {
 }
 
 // ============================================================
-//  begin() — configuración de pines y autocalibración del touch
+//  _calibrateTouch() — autocalibración de un sensor táctil
 // ============================================================
 
-void Input::begin() {
-    // --- Inicializar cola ---
-    _qHead  = 0;
-    _qTail  = 0;
-    _qCount = 0;
-
-    // --- Configurar pines de botones ---
-    pinMode(PIN_BTN_A, INPUT_PULLUP);
-    pinMode(PIN_BTN_B, INPUT_PULLUP);
-
-    // Estado inicial de botones (no presionados, HIGH por pull-up)
-    _btnA = { false, true, 0 };
-    _btnB = { false, true, 0 };
-
-    // Estado inicial del combo A+B
-    _comboStartMs = 0;
-    _comboEmitted = false;
-
-    // --- Autocalibración del touch ---
-    // Tomar TOUCH_MUESTRAS_CALIB lecturas espaciadas ~10 ms,
-    // descartar el 10% más alto y el 10% más bajo (outliers),
-    // promediar el resto → baseline.
-
+void Input::_calibrateTouch(TouchState& t, uint8_t pin, const char* label) {
     const uint16_t N = TOUCH_MUESTRAS_CALIB;
     uint32_t muestras[N];
 
-    Serial.println("[input] calibrando touch...");
+    Serial.printf("[input] calibrando %s...\n", label);
 
     for (uint16_t i = 0; i < N; i++) {
-        muestras[i] = touchRead(PIN_TOUCH);
-        delay(10);  // delay() permitido en begin() / setup()
+        muestras[i] = touchRead(pin);
+        delay(10);
     }
 
-    // Ordenar con insertion sort (N es pequeño, ≤50)
+    // Insertion sort
     for (uint16_t i = 1; i < N; i++) {
         uint32_t key = muestras[i];
         int16_t  j   = i - 1;
@@ -80,8 +52,7 @@ void Input::begin() {
         muestras[j + 1] = key;
     }
 
-    // Descartar 10% inferior y 10% superior
-    uint16_t recorte = N / 10;  // ej. 50 → 5 de cada lado
+    uint16_t recorte = N / 10;
     if (recorte == 0) recorte = 1;
 
     uint64_t suma  = 0;
@@ -91,133 +62,103 @@ void Input::begin() {
         count++;
     }
 
-    _touchBaseline = (count > 0) ? (uint32_t)(suma / count) : muestras[N / 2];
-
-    // Umbral alto: baseline * TOUCH_FACTOR_UMBRAL
-    _touchThreshHigh = (uint32_t)(_touchBaseline * TOUCH_FACTOR_UMBRAL);
-
-    // Umbral bajo con histéresis: baseline * (1 + (factor-1)*0.6)
-    // Ej. con factor 1.15: umbral bajo = baseline * 1.09
+    t.baseline    = (count > 0) ? (uint32_t)(suma / count) : muestras[N / 2];
+    t.threshHigh  = (uint32_t)(t.baseline * TOUCH_FACTOR_UMBRAL);
     float factorBajo = 1.0f + (TOUCH_FACTOR_UMBRAL - 1.0f) * 0.6f;
-    _touchThreshLow  = (uint32_t)(_touchBaseline * factorBajo);
+    t.threshLow   = (uint32_t)(t.baseline * factorBajo);
+    t.lastValue   = muestras[N / 2];
+    t.lastPollMs  = 0;
+    t.isTouching  = false;
+    t.consecHigh  = 0;
+    t.consecLow   = 0;
 
-    // Estado inicial del touch
-    _touchLastValue   = muestras[N / 2];
-    _touchLastPollMs  = 0;
-    _isTouching       = false;
-    _touchConsecHigh  = 0;
-    _touchConsecLow   = 0;
-
-    Serial.printf("[input] touch baseline=%lu umbral=%lu\n",
-                  (unsigned long)_touchBaseline,
-                  (unsigned long)_touchThreshHigh);
+    Serial.printf("[input] %s baseline=%lu umbral=%lu\n",
+                  label, (unsigned long)t.baseline, (unsigned long)t.threshHigh);
 }
 
 // ============================================================
-//  _pollBtn() — lógica de debounce y detección de flanco
+//  begin() — configuración de pines y calibración
+// ============================================================
+
+void Input::begin() {
+    _qHead  = 0;
+    _qTail  = 0;
+    _qCount = 0;
+
+    pinMode(PIN_BTN_A, INPUT_PULLUP);
+    _btnA = { false, true, 0 };
+
+    _calibrateTouch(_touch,    PIN_TOUCH,     "touch-cabeza");
+    _calibrateTouch(_touchPie, PIN_TOUCH_PIE, "touch-pie");
+}
+
+// ============================================================
+//  _pollBtn() — debounce y detección de flanco
 // ============================================================
 
 void Input::_pollBtn(BtnState& btn, uint8_t pin, InputEvent evPress,
                      const char* label, uint32_t now) {
-    bool rawActual = (digitalRead(pin) == HIGH);  // HIGH = no presionado (pull-up activo en BAJO)
+    bool rawActual = (digitalRead(pin) == HIGH);
 
     if (rawActual != btn.raw) {
-        // Hubo un cambio: reiniciar temporizador de estabilidad
         btn.raw          = rawActual;
         btn.lastChangeMs = now;
     }
 
-    // Aceptar cambio solo si el pin se mantuvo estable DEBOUNCE_MS
     if ((now - btn.lastChangeMs) >= DEBOUNCE_MS) {
-        bool nuevoEstado = !btn.raw;  // true = presionado (LOW → true)
+        bool nuevoEstado = !btn.raw;
 
         if (nuevoEstado && !btn.debounced) {
-            // Flanco de presión (HIGH→LOW debounced): emitir evento
             btn.debounced = true;
             _enqueue(evPress);
             Serial.printf("[input] %s presionado\n", label);
         } else if (!nuevoEstado && btn.debounced) {
-            // Soltar: actualizar estado interno, no emitir evento (por ahora)
             btn.debounced = false;
         }
     }
 }
 
 // ============================================================
-//  _pollCombo() — combo secreto A+B sostenido >= COMBO_AB_MS
-// ============================================================
-//  El contador arranca cuando el segundo botón se suma (ambos
-//  debounced presionados). Se resetea si cualquiera se suelta.
-//  Emite COMBO_AB_3S una sola vez; para volver a emitir hay que
-//  soltar ambos y repetir el gesto. No suprime los BTN_x_PRESS
-//  normales (main resuelve la prioridad menú/combo).
-
-void Input::_pollCombo(uint32_t now) {
-    bool ambos = _btnA.debounced && _btnB.debounced;
-
-    if (!ambos) {
-        // Al menos uno suelto: resetear contador.
-        _comboStartMs = 0;
-        // Rearmar solo cuando AMBOS están sueltos.
-        if (!_btnA.debounced && !_btnB.debounced) {
-            _comboEmitted = false;
-        }
-        return;
-    }
-
-    // Ambos presionados: arrancar el contador si no estaba corriendo.
-    if (_comboStartMs == 0) {
-        _comboStartMs = now;
-    }
-
-    // Emitir una sola vez al cumplirse la duración.
-    if (!_comboEmitted && (now - _comboStartMs) >= COMBO_AB_MS) {
-        _comboEmitted = true;
-        _enqueue(InputEvent::COMBO_AB_3S);
-        Serial.println("[input] COMBO A+B 3s");
-    }
-}
-
-// ============================================================
-//  _pollTouch() — muestreo y detección con confirmación
+//  _pollTouch() — muestreo con confirmación para un sensor
 // ============================================================
 
-void Input::_pollTouch(uint32_t now) {
-    // Muestrear como máximo cada TOUCH_POLL_MS
-    if ((now - _touchLastPollMs) < TOUCH_POLL_MS) return;
-    _touchLastPollMs = now;
+void Input::_pollTouch(TouchState& t, uint8_t pin,
+                       InputEvent evStart, InputEvent evEnd,
+                       bool emitEnd, uint32_t now) {
+    if ((now - t.lastPollMs) < TOUCH_POLL_MS) return;
+    t.lastPollMs = now;
 
-    uint32_t val      = touchRead(PIN_TOUCH);
-    _touchLastValue   = val;
+    uint32_t val = touchRead(pin);
+    t.lastValue  = val;
 
-    if (!_isTouching) {
-        // Esperando inicio de toque
-        if (val > _touchThreshHigh) {
-            _touchConsecHigh++;
-            _touchConsecLow = 0;
-            if (_touchConsecHigh >= TOUCH_LECTURAS_CONFIRMA) {
-                _isTouching      = true;
-                _touchConsecHigh = 0;
-                _enqueue(InputEvent::TOUCH_START);
-                Serial.printf("[input] TOUCH inicio (valor=%lu)\n",
+    if (!t.isTouching) {
+        if (val > t.threshHigh) {
+            t.consecHigh++;
+            t.consecLow = 0;
+            if (t.consecHigh >= TOUCH_LECTURAS_CONFIRMA) {
+                t.isTouching = true;
+                t.consecHigh = 0;
+                _enqueue(evStart);
+                Serial.printf("[input] %s inicio (val=%lu)\n",
+                              pin == PIN_TOUCH ? "TOUCH" : "TICKLE",
                               (unsigned long)val);
             }
         } else {
-            _touchConsecHigh = 0;
+            t.consecHigh = 0;
         }
     } else {
-        // Esperando fin de toque (umbral bajo con histéresis)
-        if (val <= _touchThreshLow) {
-            _touchConsecLow++;
-            _touchConsecHigh = 0;
-            if (_touchConsecLow >= TOUCH_LECTURAS_CONFIRMA) {
-                _isTouching     = false;
-                _touchConsecLow = 0;
-                _enqueue(InputEvent::TOUCH_END);
-                Serial.println("[input] TOUCH fin");
+        if (val <= t.threshLow) {
+            t.consecLow++;
+            t.consecHigh = 0;
+            if (t.consecLow >= TOUCH_LECTURAS_CONFIRMA) {
+                t.isTouching = false;
+                t.consecLow  = 0;
+                if (emitEnd) _enqueue(evEnd);
+                Serial.printf("[input] %s fin\n",
+                              pin == PIN_TOUCH ? "TOUCH" : "TICKLE");
             }
         } else {
-            _touchConsecLow = 0;
+            t.consecLow = 0;
         }
     }
 }
@@ -227,16 +168,15 @@ void Input::_pollTouch(uint32_t now) {
 // ============================================================
 
 void Input::poll(uint32_t now) {
-    _pollBtn(_btnA, PIN_BTN_A, InputEvent::BTN_A_PRESS,
-             "BTN_A (D0/GPIO1)", now);
-    _pollBtn(_btnB, PIN_BTN_B, InputEvent::BTN_B_PRESS,
-             "BTN_B (D1/GPIO2)", now);
-    _pollCombo(now);
-    _pollTouch(now);
+    _pollBtn(_btnA, PIN_BTN_A, InputEvent::BTN_A_PRESS, "BTN_A", now);
+    // Caricia en la cabeza: emite START y END
+    _pollTouch(_touch,    PIN_TOUCH,     InputEvent::TOUCH_START,  InputEvent::TOUCH_END,   true,  now);
+    // Cosquillas en el pie: solo emite START (cada toque cuenta como un evento)
+    _pollTouch(_touchPie, PIN_TOUCH_PIE, InputEvent::TICKLE_START, InputEvent::NONE,        false, now);
 }
 
 // ============================================================
-//  nextEvent() — consumir el próximo evento de la cola
+//  nextEvent()
 // ============================================================
 
 InputEvent Input::nextEvent() {
@@ -248,11 +188,13 @@ InputEvent Input::nextEvent() {
 }
 
 // ============================================================
-//  Accessors de estado crudo
+//  Accessors
 // ============================================================
 
-bool     Input::btnA()          const { return _btnA.debounced;  }
-bool     Input::btnB()          const { return _btnB.debounced;  }
-bool     Input::touching()      const { return _isTouching;      }
-uint32_t Input::touchValue()    const { return _touchLastValue;  }
-uint32_t Input::touchBaseline() const { return _touchBaseline;   }
+bool     Input::btnA()             const { return _btnA.debounced;       }
+bool     Input::touching()         const { return _touch.isTouching;     }
+bool     Input::touchingPie()      const { return _touchPie.isTouching;  }
+uint32_t Input::touchValue()       const { return _touch.lastValue;      }
+uint32_t Input::touchBaseline()    const { return _touch.baseline;       }
+uint32_t Input::touchValuePie()    const { return _touchPie.lastValue;   }
+uint32_t Input::touchBaselinePie() const { return _touchPie.baseline;    }

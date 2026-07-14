@@ -11,12 +11,9 @@
 
 // Efectos que pueden aplicarse al humor desde el exterior
 enum class MoodEffect : uint8_t {
-    BTN_A,                  // botón A presionado
-    BTN_B,                  // botón B presionado
-    CARICIA,                // sensor táctil activado
-    JUGO_PONG_GANO_HUMANO,  // la mascota perdió el pong (se ofende)
-    JUGO_PONG_GANO_CPU,     // la mascota ganó el pong
-    DESPERTADO_DE_NOCHE     // la despertaron en horario nocturno
+    CARICIA,             // sensor táctil (cabeza)
+    COSQUILLAS,          // toque en el pie — felicidad leve
+    COSQUILLAS_SEGUIDAS  // demasiadas cosquillas seguidas → se enoja
 };
 
 class Mood {

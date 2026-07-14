@@ -9,10 +9,9 @@
 enum class InputEvent : uint8_t {
     NONE,
     BTN_A_PRESS,
-    BTN_B_PRESS,
     TOUCH_START,
     TOUCH_END,
-    COMBO_AB_3S   // ambos botones sostenidos >= 3 s (minijuego oculto, doc 04 §1)
+    TICKLE_START   // toque en el sensor del pie
 };
 
 class Input {
@@ -27,11 +26,13 @@ public:
     InputEvent nextEvent();
 
     // Estado crudo para debug/pantalla
-    bool     btnA()          const;
-    bool     btnB()          const;
-    bool     touching()      const;
-    uint32_t touchValue()    const;  // última lectura cruda del touch
-    uint32_t touchBaseline() const;  // baseline de calibración
+    bool     btnA()             const;
+    bool     touching()         const;
+    bool     touchingPie()      const;
+    uint32_t touchValue()       const;
+    uint32_t touchBaseline()    const;
+    uint32_t touchValuePie()    const;
+    uint32_t touchBaselinePie() const;
 
 private:
     // --- Cola FIFO de 8 slots (array circular, sin malloc) ---
@@ -43,37 +44,35 @@ private:
 
     void _enqueue(InputEvent ev);
 
-    // --- Estado de botones ---
-    // Para cada botón: estado actual debounced, estado "raw" leído,
-    // y timestamp del último cambio raw.
+    // --- Estado del botón ---
     struct BtnState {
-        bool     debounced;     // estado aceptado (true = presionado)
-        bool     raw;           // último valor leído del pin
-        uint32_t lastChangeMs;  // cuándo cambió "raw" por última vez
+        bool     debounced;
+        bool     raw;
+        uint32_t lastChangeMs;
     };
     BtnState _btnA;
-    BtnState _btnB;
 
     void _pollBtn(BtnState& btn, uint8_t pin, InputEvent evPress,
                   const char* label, uint32_t now);
 
-    // --- Combo secreto A+B sostenido (minijuego oculto) ---
-    uint32_t _comboStartMs;   // cuándo el segundo botón se sumó (0 = no corriendo)
-    bool     _comboEmitted;   // ya se emitió; esperar a soltar ambos para rearmar
+    // --- Estado de los sensores táctiles ---
+    struct TouchState {
+        uint32_t baseline;
+        uint32_t threshHigh;
+        uint32_t threshLow;
+        uint32_t lastValue;
+        uint32_t lastPollMs;
+        bool     isTouching;
+        uint8_t  consecHigh;
+        uint8_t  consecLow;
+    };
+    TouchState _touch;     // caricia (cabeza)
+    TouchState _touchPie;  // cosquillas (pie)
 
-    void _pollCombo(uint32_t now);
-
-    // --- Estado del touch capacitivo ---
-    uint32_t _touchBaseline;    // línea base calculada en begin()
-    uint32_t _touchThreshHigh;  // umbral de "entrada al toque"
-    uint32_t _touchThreshLow;   // umbral de "salida del toque" (histéresis)
-    uint32_t _touchLastValue;   // última lectura cruda
-    uint32_t _touchLastPollMs;  // cuándo se hizo la última lectura
-    bool     _isTouching;       // estado actual confirmado
-    uint8_t  _touchConsecHigh;  // lecturas consecutivas sobre umbral alto
-    uint8_t  _touchConsecLow;   // lecturas consecutivas bajo umbral bajo
-
-    void _pollTouch(uint32_t now);
+    void _calibrateTouch(TouchState& t, uint8_t pin, const char* label);
+    void _pollTouch(TouchState& t, uint8_t pin,
+                    InputEvent evStart, InputEvent evEnd,
+                    bool emitEnd, uint32_t now);
 };
 
 extern Input input;

@@ -6,6 +6,7 @@
 // =============================================================
 
 #include "mood.h"
+#include "personality.h"
 #include "config.h"
 #include <Preferences.h>
 #include <time.h>
@@ -125,13 +126,28 @@ void Mood::update(uint32_t now, bool descansando) {
 
         if (descansando) {
             // Dormir recarga energía; el resto queda congelado.
-            _energy = _addSat(_energy, MOOD_RECUPERA_ENERGIA_PT);
+            // La cantidad recuperada depende del rasgo energetico/perezoso.
+            _energy = _addSat(_energy, personality.recuperaEnergia());
         } else {
-            // Decaimiento de energía
-            _energy = _subSat(_energy, MOOD_DECAY_ENERGIA_PM);
+            // Decaimiento de energía modulado por personalidad (§3.4):
+            // - perezoso alto  → ×2
+            // - energetico alto (y perezoso no alto) → ×0.5 (tick por medio)
+            // - ambos altos → base normal
+            if (personality.energiaDecaeMitad()) {
+                // Bool alternante: un tick decae, el siguiente no
+                static bool _energiaDecaeEste = true;
+                if (_energiaDecaeEste) {
+                    _energy = _subSat(_energy, personality.decayEnergia());
+                }
+                _energiaDecaeEste = !_energiaDecaeEste;
+            } else {
+                _energy = _subSat(_energy, personality.decayEnergia());
+            }
 
-            // Decaimiento de felicidad (doble si el aburrimiento es alto)
-            uint8_t felicidadDecay = MOOD_DECAY_FELICIDAD_PM;
+            // Decaimiento de felicidad modulado por personalidad (§3.4):
+            // alegre alto → usa PERSONALIDAD_DECAY_FELIZ_ALEGRE (1/tick)
+            // doble si el aburrimiento > 70 (se multiplica lo que devuelva decayFelicidad)
+            uint8_t felicidadDecay = personality.decayFelicidad();
             if (_boredom > 70) {
                 felicidadDecay = felicidadDecay * 2;
             }
@@ -156,51 +172,31 @@ void Mood::update(uint32_t now, bool descansando) {
 
 void Mood::apply(MoodEffect e) {
     switch (e) {
-        case MoodEffect::BTN_A:
-            _happiness = _addSat(_happiness, 10);
-            _boredom   = _subSat(_boredom,   5);
-            break;
-
-        case MoodEffect::BTN_B:
-            _energy  = _addSat(_energy,  15);
-            _boredom = _subSat(_boredom, 10);
-            break;
-
         case MoodEffect::CARICIA:
             _happiness = _addSat(_happiness, 20);
             _boredom   = _subSat(_boredom,   15);
             break;
 
-        case MoodEffect::JUGO_PONG_GANO_HUMANO:
-            // La mascota perdió el pong → se ofende
-            _happiness = _subSat(_happiness, 5);
-            _boredom   = _subSat(_boredom,   40);
-            break;
-
-        case MoodEffect::JUGO_PONG_GANO_CPU:
-            // La mascota ganó el pong
+        case MoodEffect::COSQUILLAS:
             _happiness = _addSat(_happiness, 10);
-            _boredom   = _subSat(_boredom,   40);
+            _boredom   = _subSat(_boredom,   10);
             break;
 
-        case MoodEffect::DESPERTADO_DE_NOCHE:
-            _happiness = _subSat(_happiness, 5);
+        case MoodEffect::COSQUILLAS_SEGUIDAS:
+            _happiness = _subSat(_happiness, 15);
+            _boredom   = _addSat(_boredom,   10);
             break;
+
     }
 
-    // Log del efecto con nombres legibles
     const char* nombre = "?";
     switch (e) {
-        case MoodEffect::BTN_A:                 nombre = "BTN_A";                 break;
-        case MoodEffect::BTN_B:                 nombre = "BTN_B";                 break;
-        case MoodEffect::CARICIA:               nombre = "CARICIA";               break;
-        case MoodEffect::JUGO_PONG_GANO_HUMANO: nombre = "JUGO_PONG_GANO_HUMANO"; break;
-        case MoodEffect::JUGO_PONG_GANO_CPU:    nombre = "JUGO_PONG_GANO_CPU";    break;
-        case MoodEffect::DESPERTADO_DE_NOCHE:   nombre = "DESPERTADO_DE_NOCHE";   break;
+        case MoodEffect::CARICIA:             nombre = "CARICIA";             break;
+        case MoodEffect::COSQUILLAS:          nombre = "COSQUILLAS";          break;
+        case MoodEffect::COSQUILLAS_SEGUIDAS: nombre = "COSQUILLAS_SEGUIDAS"; break;
     }
     Serial.printf("[mood] %s -> F:%u E:%u A:%u\n", nombre, _happiness, _energy, _boredom);
 
-    // Guardado inmediato
     _saveToNVS();
 }
 
@@ -213,18 +209,26 @@ void Mood::apply(MoodEffect e) {
 // ─────────────────────────────────────────────────────────────
 
 Expression Mood::dominantExpression() const {
-    // 1. Energía crítica → dormido (prioridad máxima)
-    if (_energy < 10) {
+    // 1. Energía crítica → siesta (prioridad máxima)
+    //    El umbral depende de si el rasgo perezoso es alto (§3.4)
+    if (_energy < personality.umbralSiesta()) {
         return Expression::DORMIDO;
     }
 
     // 2. Condición compuesta primero: muy infeliz Y muy aburrido → enojado
-    if (_happiness < 20 && _boredom > 60) {
+    //    Gruñón alto: umbral más fácil de alcanzar (§3.4)
+    uint8_t enojoFel  = Personality::esAlta(personality.grunon())
+                        ? PERSONALIDAD_ENOJO_FEL_GRUNON
+                        : PERSONALIDAD_ENOJO_FEL_BASE;
+    uint8_t enojoAbur = Personality::esAlta(personality.grunon())
+                        ? PERSONALIDAD_ENOJO_ABUR_GRUNON
+                        : PERSONALIDAD_ENOJO_ABUR_BASE;
+    if (_happiness < enojoFel && _boredom > enojoAbur) {
         return Expression::ENOJADO;
     }
 
     // 3. Solo infeliz (aburrimiento no suficientemente alto) → triste
-    if (_happiness < 20) {
+    if (_happiness < enojoFel) {
         return Expression::TRISTE;
     }
 
@@ -234,7 +238,11 @@ Expression Mood::dominantExpression() const {
     }
 
     // 5. Feliz y no aburrido → feliz
-    if (_happiness > 70 && _boredom < 40) {
+    //    Alegre alto: umbral de felicidad más fácil de alcanzar (§3.4)
+    uint8_t felizFel = Personality::esAlta(personality.alegre())
+                       ? PERSONALIDAD_FELIZ_FEL_ALEGRE
+                       : PERSONALIDAD_FELIZ_FEL_BASE;
+    if (_happiness > felizFel && _boredom < PERSONALIDAD_FELIZ_ABUR_BASE) {
         return Expression::FELIZ;
     }
 

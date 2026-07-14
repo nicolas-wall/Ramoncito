@@ -3,19 +3,28 @@
 //  Plataforma : Seeed XIAO ESP32-S3
 //  Display    : OLED SSD1309 128×64, librería U8g2
 //
-//  Rediseño v2: cada expresión tiene un EyeStyle por ojo.
-//  Los estilos cerrados/especiales no usan el rect+párpados
-//  sino rutinas de dibujo propias (arcos gruesos, ángulos, etc.)
+//  v2: cada expresión tiene un EyeStyle por ojo.
+//  v3 (doc 06 §2): fases INTRO → LOOP → OUTRO por expresión,
+//  moduladores de loop (rebote, pulso, temblor, barrido) y
+//  sistema de partículas para los extras (corazones, Zzz, lágrima).
 // =============================================================
 
 #include "face.h"
-#include "config.h"   // EASING_EXPRESION, EASING_MIRADA, PARPADEO_*, MIRADA_*
-#include <math.h>     // sinf, cosf
+#include "config.h"   // EASING_*, PARPADEO_*, MIRADA_*, ANIM_*
+#include <math.h>     // sinf, cosf, fabsf
 
 // ----------------------------------------------------------------
 //  Instancia global
 // ----------------------------------------------------------------
 Face face;
+
+// ----------------------------------------------------------------
+//  Tipos de partícula
+// ----------------------------------------------------------------
+static const uint8_t PART_LIBRE   = 0;
+static const uint8_t PART_CORAZON = 1;
+static const uint8_t PART_ZZZ     = 2;
+static const uint8_t PART_LAGRIMA = 3;
 
 // ----------------------------------------------------------------
 //  EyeStyle: tipo de dibujo para cada ojo
@@ -121,10 +130,13 @@ static const ExprDef EXPR_TABLE[10] = {
 
 // ----------------------------------------------------------------
 //  EyeStylePair: estilos activos para los dos ojos
-//  Se actualiza instantáneamente al llamar setExpression().
+//  Se actualiza instantáneamente al cargar la expresión.
 // ----------------------------------------------------------------
 static EyeStyle s_leftStyle  = EyeStyle::RECT;
 static EyeStyle s_rightStyle = EyeStyle::RECT;
+
+// Radio de pupila para SORPRENDIDO (lo anima el loop: pulsa 2..4 px)
+static int16_t s_pupilaR = 3;
 
 // ----------------------------------------------------------------
 //  Helpers de clamping
@@ -229,18 +241,61 @@ void Face::begin()
     _blinkState = BlinkState::IDLE;
     _blinkFrame = 0;
 
+    _fase         = AnimFase::LOOP;
+    _faseInicioMs = 0;
+    _hayPendiente = false;
+    _pendiente    = Expression::NEUTRAL;
+    _animOffX = _animOffY = 0.0f;
+    _animEscala  = 1.0f;
+    _animEscalaY = 1.0f;
+    _lidExtra    = 0.0f;
+    _loopPhase   = 0.0f;
+    _sigTemblorMs = 0;
+    _temblorX     = 0.0f;
+    _sigSpawnMs   = 0;
+    _spawnLado    = false;
+    _lastNow      = 0;
+    limpiarParticulas();
+
     uint32_t now = millis();
     scheduleNextBlink(now);
     scheduleNextGaze(now);
 }
 
 // ----------------------------------------------------------------
-//  Face::setExpression
+//  Face::setExpression — dispara la transición animada
+//  OUTRO (squash de la actual) → carga la nueva → INTRO (pop)
 // ----------------------------------------------------------------
 void Face::setExpression(Expression e)
 {
+    if (_fase == AnimFase::OUTRO) {
+        // Ya está saliendo: solo actualizar el destino
+        _pendiente = e;
+        _hayPendiente = true;
+        return;
+    }
+    if (e == _expr) return;
+
+    _pendiente    = e;
+    _hayPendiente = true;
+    _fase         = AnimFase::OUTRO;
+    _faseInicioMs = millis();
+}
+
+// ----------------------------------------------------------------
+//  Face::cambiarExpresion — carga la nueva expresión y arranca INTRO
+// ----------------------------------------------------------------
+void Face::cambiarExpresion(Expression e, uint32_t now)
+{
     _expr = e;
     exprToTargets(e, _leftTgt, _rightTgt);
+    _fase         = AnimFase::INTRO;
+    _faseInicioMs = now;
+    _loopPhase    = 0.0f;
+    _lidExtra     = 0.0f;
+    _animOffX = _animOffY = 0.0f;
+    _sigSpawnMs   = now;          // el primer extra sale enseguida
+    limpiarParticulas();
 }
 
 // ----------------------------------------------------------------
@@ -252,21 +307,199 @@ Expression Face::expression() const
 }
 
 // ----------------------------------------------------------------
+//  Partículas
+// ----------------------------------------------------------------
+void Face::limpiarParticulas()
+{
+    for (uint8_t i = 0; i < ANIM_PARTICULAS_MAX; i++) _partes[i].tipo = PART_LIBRE;
+}
+
+void Face::spawnParticula(uint8_t tipo, float x, float y,
+                          float vx, float vy, uint16_t vidaMs, uint32_t now)
+{
+    for (uint8_t i = 0; i < ANIM_PARTICULAS_MAX; i++) {
+        if (_partes[i].tipo != PART_LIBRE) continue;
+        _partes[i] = { tipo, x, y, vx, vy, now, vidaMs };
+        return;
+    }
+    // sin slots libres: se omite (no es crítico)
+}
+
+void Face::updateParticulas(uint32_t now)
+{
+    for (uint8_t i = 0; i < ANIM_PARTICULAS_MAX; i++) {
+        Particula &p = _partes[i];
+        if (p.tipo == PART_LIBRE) continue;
+
+        uint32_t edad = now - p.nacioMs;
+        if (edad >= p.vidaMs || p.y < -8.0f || p.y > 70.0f || p.x > 132.0f) {
+            p.tipo = PART_LIBRE;
+            continue;
+        }
+
+        switch (p.tipo) {
+        case PART_CORAZON:
+            // Flota hacia arriba con deriva senoidal
+            p.y += p.vy;
+            p.x += sinf((float)edad * 0.012f) * 0.5f;
+            break;
+
+        case PART_ZZZ:
+            // Sube en diagonal derecha
+            p.x += p.vx;
+            p.y += p.vy;
+            break;
+
+        case PART_LAGRIMA:
+            // Primero crece quieta en el borde del ojo, luego cae con gravedad
+            if (edad > 600) {
+                p.vy += 0.18f;
+                p.y  += p.vy;
+            }
+            break;
+        }
+    }
+}
+
+// ----------------------------------------------------------------
+//  Face::updateLoop — moduladores por expresión (INTRO y LOOP)
+// ----------------------------------------------------------------
+void Face::updateLoop(uint32_t now)
+{
+    _animOffX = 0.0f;
+    _animOffY = 0.0f;
+    _lidExtra = 0.0f;
+    float pulso = 1.0f;
+
+    switch (_expr) {
+
+    case Expression::FELIZ:
+        // Rebote vertical alegre (solo hacia arriba, como saltitos)
+        _loopPhase += ANIM_FELIZ_VEL;
+        _animOffY = -fabsf(sinf(_loopPhase)) * ANIM_FELIZ_AMPL_PX;
+        break;
+
+    case Expression::AMOR:
+        // Ojos pulsando tamaño + corazones flotando
+        _loopPhase += ANIM_AMOR_VEL;
+        pulso = 1.0f + ANIM_AMOR_PULSO * sinf(_loopPhase);
+        if ((int32_t)(now - _sigSpawnMs) >= 0) {
+            _spawnLado = !_spawnLado;
+            float px = (_spawnLado ? EYE_LEFT_CX : EYE_RIGHT_CX)
+                       + (float)(random(9)) - 4.0f;
+            spawnParticula(PART_CORAZON, px, 16.0f, 0.0f, -0.55f,
+                           ANIM_CORAZON_VIDA_MS, now);
+            _sigSpawnMs = now + ANIM_CORAZON_SPAWN_MS;
+        }
+        break;
+
+    case Expression::DORMIDO:
+        // Z's subiendo en diagonal (la respiración lenta se maneja aparte)
+        if ((int32_t)(now - _sigSpawnMs) >= 0) {
+            spawnParticula(PART_ZZZ, 96.0f, 26.0f, 0.38f, -0.5f,
+                           ANIM_ZZZ_VIDA_MS, now);
+            _sigSpawnMs = now + ANIM_ZZZ_SPAWN_MS;
+        }
+        break;
+
+    case Expression::ENOJADO:
+        // Temblor horizontal aleatorio
+        if ((int32_t)(now - _sigTemblorMs) >= 0) {
+            _temblorX    = (float)(random(3)) - 1.0f;   // -1, 0, +1
+            _sigTemblorMs = now + ANIM_ENOJADO_TEMBLOR_MS;
+        }
+        _animOffX = _temblorX;
+        break;
+
+    case Expression::TRISTE:
+        // Micro-temblor de párpados + lágrima periódica
+        _loopPhase += 0.3f;
+        _animOffY = sinf(_loopPhase) * 0.4f;
+        if ((int32_t)(now - _sigSpawnMs) >= 0) {
+            spawnParticula(PART_LAGRIMA, EYE_LEFT_CX - 10.0f, 44.0f,
+                           0.0f, 0.0f, ANIM_LAGRIMA_VIDA_MS, now);
+            _sigSpawnMs = now + ANIM_LAGRIMA_SPAWN_MS;
+        }
+        break;
+
+    case Expression::ABURRIDO: {
+        // Párpado superior baja lentamente hasta casi cerrar y reabre
+        float ph = (float)(now % ANIM_ABURRIDO_CICLO_MS) / (float)ANIM_ABURRIDO_CICLO_MS;
+        _lidExtra = (0.5f - 0.5f * cosf(ph * 6.2832f)) * (_leftTgt.h * 0.55f);
+        break;
+    }
+
+    case Expression::SORPRENDIDO:
+        // Pupila pulsando
+        _loopPhase += 0.12f;
+        s_pupilaR = (int16_t)(3.0f + sinf(_loopPhase) * 1.4f);
+        if (s_pupilaR < 2) s_pupilaR = 2;
+        break;
+
+    case Expression::SOSPECHOSO:
+        // La mirada barre lentamente izquierda ↔ derecha
+        _gazeTgtX = sinf((float)now * ANIM_SOSP_VEL) * ANIM_SOSP_RANGO_PX;
+        _gazeTgtY = 0.0f;
+        break;
+
+    default:
+        break;   // NEUTRAL, GUINO: solo capa base
+    }
+
+    // Escala de fase (overshoot INTRO / squash OUTRO) sobre el pulso del loop
+    _animEscala  = pulso;
+    _animEscalaY = 1.0f;
+
+    if (_fase == AnimFase::INTRO) {
+        float t = (float)(now - _faseInicioMs) / (float)ANIM_INTRO_MS;
+        t = clampf(t, 0.0f, 1.0f);
+        float os = (_expr == Expression::SORPRENDIDO) ? ANIM_OVERSHOOT_SORPRESA
+                                                      : ANIM_OVERSHOOT;
+        // Pop: crece por encima de 1 y asienta (senoidal medio ciclo)
+        _animEscala *= 1.0f + os * sinf(t * 3.1416f);
+    } else if (_fase == AnimFase::OUTRO) {
+        float t = (float)(now - _faseInicioMs) / (float)ANIM_OUTRO_MS;
+        t = clampf(t, 0.0f, 1.0f);
+        // Squash: la altura se comprime hacia ANIM_SQUASH_MIN
+        _animEscalaY = 1.0f - (1.0f - ANIM_SQUASH_MIN) * t;
+    }
+}
+
+// ----------------------------------------------------------------
 //  Face::update  —  llamar una vez por frame (now = millis())
 // ----------------------------------------------------------------
 void Face::update(uint32_t now)
 {
+    _lastNow = now;
+
+    // --- 0. Avance de fase INTRO/LOOP/OUTRO ----------------------
+    if (_fase == AnimFase::OUTRO) {
+        if ((now - _faseInicioMs) >= ANIM_OUTRO_MS) {
+            cambiarExpresion(_hayPendiente ? _pendiente : _expr, now);
+            _hayPendiente = false;
+        }
+    } else if (_fase == AnimFase::INTRO) {
+        if ((now - _faseInicioMs) >= ANIM_INTRO_MS) {
+            _fase = AnimFase::LOOP;
+        }
+    }
+
     // --- 1. Interpolación expresión (ease-out) -------------------
     lerpEye(_leftCur,  _leftTgt,  EASING_EXPRESION);
     lerpEye(_rightCur, _rightTgt, EASING_EXPRESION);
 
     // --- 2. Mirada errante --------------------------------------
+    // (SOSPECHOSO pisa el objetivo con su barrido en updateLoop)
     if (now >= _gazeNextMs) {
         float rango = MIRADA_RANGO_PX * 2.0f;
         _gazeTgtX = -MIRADA_RANGO_PX + (float)(random((long)(rango * 100))) / 100.0f;
         _gazeTgtY = -MIRADA_RANGO_PX + (float)(random((long)(rango * 100))) / 100.0f;
         scheduleNextGaze(now);
     }
+
+    // --- 3. Moduladores del loop por expresión -------------------
+    updateLoop(now);
+
     _gazeOffX += (_gazeTgtX - _gazeOffX) * EASING_MIRADA;
     _gazeOffY += (_gazeTgtY - _gazeOffY) * EASING_MIRADA;
 
@@ -275,14 +508,24 @@ void Face::update(uint32_t now)
     _rightCur.offX = _gazeOffX;
     _rightCur.offY = _gazeOffY;
 
-    // --- 3. Micro-movimiento senoidal (respiración) -------------
-    _breathPhase += 0.063f;
+    // --- 4. Micro-movimiento senoidal (respiración) -------------
+    // DORMIDO respira más lento y más amplio (doc 06 §2.2)
+    float breathOff;
+    if (_expr == Expression::DORMIDO) {
+        _breathPhase += ANIM_DORMIDO_VEL;
+        breathOff = sinf(_breathPhase) * ANIM_DORMIDO_AMPL_PX;
+    } else {
+        _breathPhase += 0.063f;
+        breathOff = sinf(_breathPhase) * 1.0f;
+    }
     if (_breathPhase > 6.2832f) _breathPhase -= 6.2832f;
-    float breathOff = sinf(_breathPhase) * 1.0f;
     _leftCur.offY  += breathOff;
     _rightCur.offY += breathOff;
 
-    // --- 4. Parpadeo --------------------------------------------
+    // --- 5. Partículas -------------------------------------------
+    updateParticulas(now);
+
+    // --- 6. Parpadeo --------------------------------------------
     // Solo para expresiones con ojos "abiertos" (RECT, CIRCULO*)
     // Los estilos cerrados (ARCO_ABAJO, SLAB, ANGULO) no parpadean.
     bool estiloIzqParpadeaOk = (s_leftStyle  == EyeStyle::RECT ||
@@ -477,6 +720,7 @@ static void drawEyeCirculo(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
 
 // ----------------------------------------------------------------
 //  drawEyeCirculoPupila — disco blanco con puntito negro (SORPRENDIDO)
+//  El radio de la pupila lo anima el loop (s_pupilaR, pulsa 2..4 px).
 // ----------------------------------------------------------------
 static void drawEyeCirculoPupila(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
 {
@@ -484,9 +728,9 @@ static void drawEyeCirculoPupila(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
     if (rx < 4) rx = 4;
     u8.setDrawColor(1);
     u8.drawDisc((u8g2_uint_t)cx, (u8g2_uint_t)cy, (u8g2_uint_t)rx);
-    // Pupila: disco negro de 3px en el centro
+    // Pupila: disco negro animado en el centro
     u8.setDrawColor(0);
-    u8.drawDisc((u8g2_uint_t)cx, (u8g2_uint_t)cy, 3);
+    u8.drawDisc((u8g2_uint_t)cx, (u8g2_uint_t)cy, (u8g2_uint_t)s_pupilaR);
     u8.setDrawColor(1);
 }
 
@@ -526,9 +770,19 @@ static void drawEyeSlab(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
 
 // ================================================================
 //  Face::drawEye  —  despachador por EyeStyle
+//  Aplica los moduladores de animación (_animOffX/Y, _animEscala,
+//  _animEscalaY, _lidExtra) sobre una copia local de los parámetros.
 // ================================================================
-void Face::drawEye(U8G2 &u8, const EyeParams &p)
+void Face::drawEye(U8G2 &u8, const EyeParams &pIn)
 {
+    // Copia con moduladores de animación aplicados
+    EyeParams p = pIn;
+    p.w    *= _animEscala;
+    p.h    *= _animEscala * _animEscalaY;
+    p.offX += _animOffX;
+    p.offY += _animOffY;
+    p.pTop += _lidExtra;
+
     // Determinar qué estilo corresponde a este ojo
     // (izquierdo si cx < 64, derecho si cx >= 64)
     bool isLeft   = (p.cx < 64.0f);
@@ -670,40 +924,119 @@ void Face::drawEye(U8G2 &u8, const EyeParams &p)
 }
 
 // ----------------------------------------------------------------
-//  Dibuja corazón pequeño flotando arriba del centro (AMOR)
-//  Dos discos + un triángulo invertido
+//  drawHeart — corazón de tamaño variable (partículas de AMOR)
+//  Dos discos + un triángulo invertido; r = radio de los lóbulos
 // ----------------------------------------------------------------
-static void drawHeartSmall(U8G2 &u8, int16_t cx, int16_t cy)
+static void drawHeart(U8G2 &u8, int16_t cx, int16_t cy, int16_t r)
 {
-    // Radio de los discos superiores
-    int16_t r = 4;
-    // Dos discos que forman la parte superior del corazón
+    if (r < 2) r = 2;
     u8.setDrawColor(1);
-    u8.drawDisc((u8g2_uint_t)(cx - r + 1), (u8g2_uint_t)cy,       (u8g2_uint_t)r);
-    u8.drawDisc((u8g2_uint_t)(cx + r - 1), (u8g2_uint_t)cy,       (u8g2_uint_t)r);
-    // Triángulo invertido que forma la punta inferior del corazón
+    u8.drawDisc((u8g2_uint_t)(cx - r + 1), (u8g2_uint_t)cy, (u8g2_uint_t)r);
+    u8.drawDisc((u8g2_uint_t)(cx + r - 1), (u8g2_uint_t)cy, (u8g2_uint_t)r);
     u8.drawTriangle(cx - r * 2 + 1, cy + 1,
                     cx + r * 2 - 1, cy + 1,
                     cx,             cy + r * 2);
 }
 
 // ----------------------------------------------------------------
-//  Face::render  —  dibuja ambos ojos en el buffer (sin clear/send)
+//  Face::renderParticulas — corazones, Zzz, lágrima
+// ----------------------------------------------------------------
+void Face::renderParticulas(U8G2 &u8)
+{
+    for (uint8_t i = 0; i < ANIM_PARTICULAS_MAX; i++) {
+        const Particula &p = _partes[i];
+        if (p.tipo == PART_LIBRE) continue;
+
+        uint32_t edad = _lastNow - p.nacioMs;
+        float    vida = (float)edad / (float)p.vidaMs;   // 0..1
+        int16_t  px = (int16_t)p.x;
+        int16_t  py = (int16_t)p.y;
+
+        switch (p.tipo) {
+
+        case PART_CORAZON: {
+            // Crece y se achica: seno de medio ciclo sobre la vida
+            int16_t r = (int16_t)(2.0f + 2.0f * sinf(vida * 3.1416f));
+            drawHeart(u8, px, py, r);
+            break;
+        }
+
+        case PART_ZZZ:
+            // Va creciendo con la edad: "z" chica → "Z" grande
+            u8.setDrawColor(1);
+            if (vida < 0.45f) {
+                u8.setFont(u8g2_font_4x6_tf);
+                u8.drawStr(px, py, "z");
+            } else {
+                u8.setFont(u8g2_font_5x8_tf);
+                u8.drawStr(px, py, "Z");
+            }
+            break;
+
+        case PART_LAGRIMA: {
+            // Crece en el borde del ojo, luego cae (updateParticulas)
+            int16_t r = (edad < 600) ? (int16_t)(1 + edad / 300) : 2;
+            u8.setDrawColor(1);
+            u8.drawDisc((u8g2_uint_t)px, (u8g2_uint_t)py, (u8g2_uint_t)r);
+            break;
+        }
+        }
+    }
+}
+
+// ----------------------------------------------------------------
+//  Face::renderExtras — adornos no-partícula por expresión
+// ----------------------------------------------------------------
+void Face::renderExtras(U8G2 &u8)
+{
+    switch (_expr) {
+
+    case Expression::ENOJADO:
+        // Rayitas de furia sobre los costados, parpadeando
+        if ((_lastNow / 300) % 2 == 0) {
+            u8.setDrawColor(1);
+            // Izquierda: dos rayitas inclinadas
+            u8.drawLine(10, 16, 16, 10);
+            u8.drawLine(14, 20, 20, 14);
+            // Derecha: espejadas
+            u8.drawLine(112, 10, 118, 16);
+            u8.drawLine(108, 14, 114, 20);
+        }
+        break;
+
+    case Expression::ABURRIDO: {
+        // "..." apareciendo de a un punto (ciclo de 4: 0-3 puntos)
+        uint8_t puntos = (uint8_t)((_lastNow / 600) % 4);
+        u8.setDrawColor(1);
+        for (uint8_t i = 0; i < puntos; i++) {
+            u8.drawDisc((u8g2_uint_t)(56 + i * 8), 56, 1);
+        }
+        break;
+    }
+
+    case Expression::SOSPECHOSO:
+        // "?" flotando arriba a la derecha, con parpadeo y vaivén
+        if ((_lastNow % 900) < 600) {
+            float bob = sinf((float)_lastNow * 0.005f) * 2.0f;
+            u8.setDrawColor(1);
+            u8.setFont(u8g2_font_6x12_tf);
+            u8.drawStr(110, (int16_t)(14 + bob), "?");
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+// ----------------------------------------------------------------
+//  Face::render  —  dibuja ojos + partículas + extras
 // ----------------------------------------------------------------
 void Face::render(U8G2 &u8)
 {
     drawEye(u8, _leftCur);
     drawEye(u8, _rightCur);
-
-    // Texto "Zzz" para DORMIDO
-    if (_expr == Expression::DORMIDO) {
-        u8.setDrawColor(1);
-        u8.setFont(u8g2_font_4x6_tf);
-        u8.drawStr(100, 12, "Zzz");
-    }
-
-    // Corazón flotando arriba para AMOR
-    if (_expr == Expression::AMOR) {
-        drawHeartSmall(u8, 64, 8);
-    }
+    renderParticulas(u8);
+    renderExtras(u8);
+    u8.setDrawColor(1);
 }

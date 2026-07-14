@@ -16,7 +16,14 @@ struct MenuData {
     bool    wifiConfigurada;   // hay SSID guardado
     const char* ssid;          // SSID guardado ("" si no hay)
     bool    portalActivo;
+    // Rasgos de personalidad (Etapa C)
+    uint8_t alegre;         // 0-100
+    uint8_t grunon;         // 0-100
+    uint8_t energetico;     // 0-100
+    uint8_t perezoso;       // 0-100
+    int     edadDias;       // -1 si sin hora válida; < PERSONALIDAD_DIAS_FORMACION si en formación
 };
 
 // Dibuja la pantalla de estado completa (no llama clearBuffer/sendBuffer)
-void menuRender(U8G2 &u8, const MenuData &d);
+// pagina: 1 = stats actual, 2 = personalidad + edad
+void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina);
