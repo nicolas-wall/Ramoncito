@@ -60,6 +60,9 @@ static uint8_t  ticklesSeguidos = 0;
 static uint32_t ultimoTickle    = 0;
 static uint32_t malhumorHasta   = 0;  // 0 = sin malhumor; > 0 = timestamp de expiración
 
+// ----- Bloqueo táctil tras presionar botón ----------------------
+static uint32_t ultimoBotonMs   = 0;  // timestamp del último BTN_A_PRESS
+
 // ----- Expresiones aleatorias idle ----------------------------
 static uint32_t sigGuino       = 0;
 static uint32_t sigSospechoso  = 0;
@@ -180,6 +183,9 @@ static void despacharEventos(uint32_t ahora) {
 
         // Standby: cualquier toque o botón despierta la pantalla
         if (appState == AppState::STANDBY) {
+            if (ev == InputEvent::BTN_A_PRESS) {
+                ultimoBotonMs = ahora;
+            }
             salirStandby(ahora);
             continue;
         }
@@ -188,33 +194,44 @@ static void despacharEventos(uint32_t ahora) {
         // muestran una reacción facial breve sin cambiar appState (§1.3).
         if (appState == AppState::SLEEPING) {
             if (ev == InputEvent::BTN_A_PRESS) {
+                ultimoBotonMs = ahora;
                 appState  = AppState::MENU;
                 menuPagina = 1;  // reiniciar en página 1 (Etapa C)
                 menuHasta = ahora + MENU_TIMEOUT_MS;
                 sound.play(Melody::BIP);
             } else if (ev == InputEvent::TOUCH_START) {
-                bool dentroDeVentana = (ahora - ultimaCariciaNoche) <= CARICIA_NOCHE_VENTANA_MS
-                                       && ultimaCariciaNoche != 0;
-                if (!dentroDeVentana) {
-                    // 1.ª caricia: cara FELIZ sin despertar
-                    ultimaCariciaNoche = ahora;
-                    face.setExpression(Expression::FELIZ);
-                    caraNocheHasta = ahora + REACCION_NOCHE_FELIZ_MS;
+                // Ignorar touch si estamos en lockout del botón
+                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
+                    Serial.println("[app] touch ignorado (lockout boton)");
                 } else {
-                    // 2.ª caricia dentro de la ventana: enojo nocturno.
-                    // Renueva la ventana: seguir acariciando lo sigue enojando.
-                    ultimaCariciaNoche = ahora;
+                    bool dentroDeVentana = (ahora - ultimaCariciaNoche) <= CARICIA_NOCHE_VENTANA_MS
+                                           && ultimaCariciaNoche != 0;
+                    if (!dentroDeVentana) {
+                        // 1.ª caricia: cara FELIZ sin despertar
+                        ultimaCariciaNoche = ahora;
+                        face.setExpression(Expression::FELIZ);
+                        caraNocheHasta = ahora + REACCION_NOCHE_FELIZ_MS;
+                    } else {
+                        // 2.ª caricia dentro de la ventana: enojo nocturno.
+                        // Renueva la ventana: seguir acariciando lo sigue enojando.
+                        ultimaCariciaNoche = ahora;
+                        personality.event(PersEvent::ENOJO_NOCTURNO);
+                        face.setExpression(Expression::ENOJADO);
+                        sound.play(Melody::ENOJADO);
+                        caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
+                    }
+                }
+            } else if (ev == InputEvent::TICKLE_START) {
+                // Ignorar tickle si estamos en lockout del botón
+                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
+                    Serial.println("[app] touch ignorado (lockout boton)");
+                } else {
+                    // Cosquilla durmiendo: enojo nocturno directo
                     personality.event(PersEvent::ENOJO_NOCTURNO);
                     face.setExpression(Expression::ENOJADO);
                     sound.play(Melody::ENOJADO);
                     caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
                 }
-            } else if (ev == InputEvent::TICKLE_START) {
-                // Cosquilla durmiendo: enojo nocturno directo
-                personality.event(PersEvent::ENOJO_NOCTURNO);
-                face.setExpression(Expression::ENOJADO);
-                sound.play(Melody::ENOJADO);
-                caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
             }
             continue;
         }
@@ -222,6 +239,7 @@ static void despacharEventos(uint32_t ahora) {
         // En el menú: botón abre la siguiente página o cierra
         if (appState == AppState::MENU) {
             if (ev == InputEvent::BTN_A_PRESS) {
+                ultimoBotonMs = ahora;
                 if (menuPagina == 1) {
                     // Pasar a página 2
                     menuPagina = 2;
@@ -242,6 +260,7 @@ static void despacharEventos(uint32_t ahora) {
 
         switch (ev) {
             case InputEvent::BTN_A_PRESS:
+                ultimoBotonMs = ahora;
                 marcarActividad(ahora);
                 randExprActiva  = false;
                 appState  = AppState::MENU;
@@ -251,50 +270,60 @@ static void despacharEventos(uint32_t ahora) {
                 break;
 
             case InputEvent::TOUCH_START: {
-                bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
-                mood.apply(MoodEffect::CARICIA);
-                personality.event(PersEvent::CARICIA);
-                sound.play(Melody::AMOR);
-                if (enMalhumor) {
-                    // Perdona: corta el tiempo restante a la mitad (§1.2)
-                    uint32_t restante = malhumorHasta - ahora;
-                    malhumorHasta = ahora + restante / 2;
+                // Ignorar touch si estamos en lockout del botón
+                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
+                    Serial.println("[app] touch ignorado (lockout boton)");
+                } else {
+                    bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
+                    mood.apply(MoodEffect::CARICIA);
+                    personality.event(PersEvent::CARICIA);
+                    sound.play(Melody::AMOR);
+                    if (enMalhumor) {
+                        // Perdona: corta el tiempo restante a la mitad (§1.2)
+                        uint32_t restante = malhumorHasta - ahora;
+                        malhumorHasta = ahora + restante / 2;
+                    }
+                    reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora, true);
                 }
-                reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora, true);
                 break;
             }
 
             case InputEvent::TICKLE_START: {
-                bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
-                if (enMalhumor) {
-                    // Durante malhumor: renueva el enojo, extiende el malhumor (§1.2)
-                    // El tiempo de malhumor es dinámico según personalidad
-                    malhumorHasta = ahora + personality.malhumorMs();
-                    personality.event(PersEvent::ENOJO_COSQUILLAS);
-                    sound.play(Melody::ENOJADO);
-                    reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
-                    // No aplicar mood positivo; no incrementar ticklesSeguidos
+                // Ignorar tickle si estamos en lockout del botón
+                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
+                    Serial.println("[app] touch ignorado (lockout boton)");
                 } else {
-                    marcarActividad(ahora);
-                    if ((ahora - ultimoTickle) > TICKLE_VENTANA_MS) {
-                        ticklesSeguidos = 0;
-                    }
-                    ticklesSeguidos++;
-                    ultimoTickle = ahora;
-
-                    // Límite dinámico: 2 cosquillas si gruñón alto, 3 en otro caso
-                    if (ticklesSeguidos >= personality.tickleMax()) {
-                        ticklesSeguidos = 0;
-                        malhumorHasta = ahora + personality.malhumorMs();  // malhumor dinámico (§1.2)
-                        mood.apply(MoodEffect::COSQUILLAS_SEGUIDAS);
+                    bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
+                    if (enMalhumor) {
+                        // Durante malhumor: renueva el enojo, extiende el malhumor (§1.2)
+                        // El tiempo de malhumor es dinámico según personalidad
+                        malhumorHasta = ahora + personality.malhumorMs();
                         personality.event(PersEvent::ENOJO_COSQUILLAS);
                         sound.play(Melody::ENOJADO);
                         reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
+                        // No aplicar mood positivo; no incrementar ticklesSeguidos
                     } else {
-                        mood.apply(MoodEffect::COSQUILLAS);
-                        personality.event(PersEvent::COSQUILLAS_OK);
-                        sound.play(Melody::FELIZ);
-                        reaccionar(Expression::FELIZ, REACCION_TICKLE_MS, "je je", ahora);
+                        marcarActividad(ahora);
+                        if ((ahora - ultimoTickle) > TICKLE_VENTANA_MS) {
+                            ticklesSeguidos = 0;
+                        }
+                        ticklesSeguidos++;
+                        ultimoTickle = ahora;
+
+                        // Límite dinámico: 2 cosquillas si gruñón alto, 3 en otro caso
+                        if (ticklesSeguidos >= personality.tickleMax()) {
+                            ticklesSeguidos = 0;
+                            malhumorHasta = ahora + personality.malhumorMs();  // malhumor dinámico (§1.2)
+                            mood.apply(MoodEffect::COSQUILLAS_SEGUIDAS);
+                            personality.event(PersEvent::ENOJO_COSQUILLAS);
+                            sound.play(Melody::ENOJADO);
+                            reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
+                        } else {
+                            mood.apply(MoodEffect::COSQUILLAS);
+                            personality.event(PersEvent::COSQUILLAS_OK);
+                            sound.play(Melody::FELIZ);
+                            reaccionar(Expression::FELIZ, REACCION_TICKLE_MS, "je je", ahora);
+                        }
                     }
                 }
                 break;

@@ -122,10 +122,10 @@ static const ExprDef EXPR_TABLE[10] = {
       0, 0, 0, 0, EyeStyle::CIRCULO,
       26, 26, 13 },
 
-    // 9 — GUINO: ojo izq cerrado "‿" (arco abajo/feliz), ojo der abierto "^"
-    { 0, 0, 0, 0, EyeStyle::ARCO_ABAJO,
-      0, 0, 0, 0, EyeStyle::ARCO_ARRIBA,
-      28, 14, 0 },
+    // 9 — GUINO: ojo izq abierto normal (rect), ojo der cerrado (línea fina con rPTop=18)
+    { 0, 0, 0, 0, EyeStyle::RECT,
+      18, 0, 0, 0, EyeStyle::RECT,
+      28, 22, 6 },
 };
 
 // ----------------------------------------------------------------

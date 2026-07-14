@@ -36,6 +36,7 @@ static const uint16_t TOUCH_MUESTRAS_CALIB    = 50;
 static const float    TOUCH_FACTOR_UMBRAL     = 1.15f;
 static const uint8_t  TOUCH_LECTURAS_CONFIRMA = 3;
 static const uint32_t TOUCH_POLL_MS           = 20;
+static const uint32_t TOUCH_LOCKOUT_BOTON_MS = 800;  // ignorar touch tras apretar el botón (toques fantasma por acople)
 
 // ----- Reacciones (duraciones en ms) --------------------------
 static const uint32_t REACCION_BTN_MS    = 1500;
