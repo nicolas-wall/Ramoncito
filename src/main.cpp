@@ -322,7 +322,7 @@ static void despacharEventos(uint32_t ahora) {
                             mood.apply(MoodEffect::COSQUILLAS);
                             personality.event(PersEvent::COSQUILLAS_OK);
                             sound.play(Melody::FELIZ);
-                            reaccionar(Expression::FELIZ, REACCION_TICKLE_MS, "je je", ahora);
+                            reaccionar(Expression::RISA, REACCION_TICKLE_MS, "jajaja", ahora);
                         }
                     }
                 }
@@ -638,7 +638,7 @@ void loop() {
         face.render(u8g2);
         if (appState == AppState::REACTING && reaccionLabel[0] != '\0') {
             u8g2.setFont(u8g2_font_5x7_tf);
-            u8g2.drawStr(2, 63, reaccionLabel);
+            u8g2.drawStr(2, 8, reaccionLabel);  // arriba: baseline y=8, pegado a la izquierda
         }
     }
     u8g2.sendBuffer();

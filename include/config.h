@@ -88,6 +88,8 @@ static const float    ANIM_SQUASH_MIN         = 0.30f; // altura mínima al fina
 // Loop por expresión:
 static const float    ANIM_FELIZ_AMPL_PX   = 2.0f;   // rebote vertical FELIZ
 static const float    ANIM_FELIZ_VEL       = 0.28f;  // rad/frame del rebote
+static const float    ANIM_RISA_AMPL_PX   = 3.0f;   // rebote vertical RISA (más enérgico)
+static const float    ANIM_RISA_VEL       = 0.40f;  // rad/frame del rebote RISA
 static const float    ANIM_AMOR_PULSO      = 0.10f;  // ±10 % de tamaño en AMOR
 static const float    ANIM_AMOR_VEL        = 0.20f;  // rad/frame del pulso
 static const float    ANIM_DORMIDO_AMPL_PX = 2.0f;   // respiración amplia dormido

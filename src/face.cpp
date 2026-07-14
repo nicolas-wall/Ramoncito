@@ -31,7 +31,7 @@ static const uint8_t PART_LAGRIMA = 3;
 // ----------------------------------------------------------------
 enum class EyeStyle : uint8_t {
     RECT,          // rectángulo redondeado con párpados (comportamiento original)
-    ARCO_ARRIBA,   // "^^"  — semicírculo con abertura hacia abajo (FELIZ, mitad superior)
+    ARCO_ARRIBA,   // "^^"  — semicírculo con abertura hacia abajo (sin uso en tabla; funciones conservadas)
     ARCO_ABAJO,    // "‿‿"  — semicírculo con abertura hacia arriba (DORMIDO, mitad inferior)
     ANGULO,        // "> <" — triángulo/ángulo apuntando al centro (ENOJADO)
     CIRCULO,       // disco sólido sin pupila (AMOR, SORPRENDIDO)
@@ -64,21 +64,22 @@ static const float EYE_CY       = 35.0f;
 // ----------------------------------------------------------------
 //  Tabla de expresiones
 //  Orden: NEUTRAL, FELIZ, TRISTE, ENOJADO, SORPRENDIDO,
-//         ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO
+//         ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO, RISA
 //
 //  Los campos pTop/pBot/slope sólo tienen efecto en EyeStyle::RECT.
 // ----------------------------------------------------------------
-static const ExprDef EXPR_TABLE[10] = {
+static const ExprDef EXPR_TABLE[11] = {
 
     // 0 — NEUTRAL: rectángulos redondeados normales
     { 0, 0, 0, 0, EyeStyle::RECT,
       0, 0, 0, 0, EyeStyle::RECT,
       28, 22, 6 },
 
-    // 1 — FELIZ: arcos "^^" gruesos — semicírculo superior, abierto abajo
-    { 0, 0, 0, 0, EyeStyle::ARCO_ARRIBA,
-      0, 0, 0, 0, EyeStyle::ARCO_ARRIBA,
-      28, 14, 0 },
+    // 1 — FELIZ: ojos sonrientes entrecerrados — párpado inferior subido (pBot=7)
+    //   simula mejillas de sonrisa; pTop=0 (parte superior libre).
+    { 0, 7, 0, 0, EyeStyle::RECT,
+      0, 7, 0, 0, EyeStyle::RECT,
+      28, 20, 8 },
 
     // 2 — TRISTE: párpados externos muy caídos (rect con pendiente fuerte)
     //   Convenio de slopeTop: valor > 0 → el lado DERECHO del párpado sube
@@ -106,6 +107,7 @@ static const ExprDef EXPR_TABLE[10] = {
       28, 20, 6 },
 
     // 6 — DORMIDO: arcos "‿‿" — semicírculo inferior, abierto arriba + Zzz
+    //   (diseño original; al usuario le gusta así)
     { 0, 0, 0, 0, EyeStyle::ARCO_ABAJO,
       0, 0, 0, 0, EyeStyle::ARCO_ABAJO,
       28, 14, 0 },
@@ -126,6 +128,13 @@ static const ExprDef EXPR_TABLE[10] = {
     { 0, 0, 0, 0, EyeStyle::RECT,
       18, 0, 0, 0, EyeStyle::RECT,
       28, 22, 6 },
+
+    // 10 — RISA (cosquillas): ojos muy entrecerrados de risa — como FELIZ pero
+    //   más apretados (pBot=8 sobre h=16) y con rebote más enérgico + "jajaja".
+    //   Sin arcos: al usuario no le gustan los semicírculos de la vieja FELIZ.
+    { 0, 8, 0, 0, EyeStyle::RECT,
+      0, 8, 0, 0, EyeStyle::RECT,
+      28, 16, 8 },
 };
 
 // ----------------------------------------------------------------
@@ -152,7 +161,7 @@ static void exprToTargets(Expression e,
                           EyeParams &lt, EyeParams &rt)
 {
     uint8_t idx = (uint8_t)e;
-    if (idx >= 10) idx = 0;
+    if (idx >= 11) idx = 0;
     const ExprDef &d = EXPR_TABLE[idx];
 
     lt.cx       = EYE_LEFT_CX;
@@ -472,6 +481,12 @@ void Face::updateLoop(uint32_t now)
         // La mirada barre lentamente izquierda ↔ derecha
         _gazeTgtX = sinf((float)now * ANIM_SOSP_VEL) * ANIM_SOSP_RANGO_PX;
         _gazeTgtY = 0.0f;
+        break;
+
+    case Expression::RISA:
+        // Rebote vertical enérgico — igual que FELIZ pero más amplio y rápido
+        _loopPhase += ANIM_RISA_VEL;
+        _animOffY = -fabsf(sinf(_loopPhase)) * ANIM_RISA_AMPL_PX;
         break;
 
     default:

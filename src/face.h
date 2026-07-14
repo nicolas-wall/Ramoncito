@@ -13,7 +13,8 @@
 
 enum class Expression : uint8_t {
     NEUTRAL, FELIZ, TRISTE, ENOJADO, SORPRENDIDO,
-    ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO
+    ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO,
+    RISA   // risa por cosquillas ("^^" enérgico)
 };
 
 // Gesto idle que puede estar activo mientras la cara está en LOOP
