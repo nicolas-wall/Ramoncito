@@ -116,6 +116,11 @@ private:
     void _handleCaptiveRedirect();
     void _handleScan();
 
+    // Handlers OTA (subida de firmware por web)
+    void _handleOtaGet();     // GET  /update — formulario de subida
+    void _handleOtaPost();    // POST /update — respuesta con resultado + restart
+    void _handleOtaUpload();  // callback de upload del WebServer
+
     // Genera el HTML del portal (strings en RAM; se descarta tras enviar)
     String _htmlPortal();
 };

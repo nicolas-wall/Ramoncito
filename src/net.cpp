@@ -37,6 +37,9 @@
 //
 //  El portal cautivo responde también a las sondas de Android/iOS para
 //  que el teléfono muestre la notificación de "iniciar sesión".
+//
+//  ACTUALIZACIÓN OTA: conectarse al AP espToy-setup → http://192.168.4.1/update
+//  → usuario/clave esptoy/esptoy → elegir firmware.bin y pulsar "Actualizar".
 // =============================================================
 
 #include "net.h"
@@ -46,6 +49,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <Update.h>       // OTA por web
 
 // Instancia global accesible desde main.cpp
 Net net;
@@ -482,6 +486,15 @@ void Net::_iniciarPortal() {
         _server->on("/settime", [this]() { _handleSetTime(); });
         _server->on("/scan", [this]() { _handleScan(); });
 
+        // Rutas OTA (solo si habilitado en config.h)
+        if (OTA_HABILITADO) {
+            _server->on("/update", HTTP_GET,  [this]() { _handleOtaGet(); });
+            _server->on("/update", HTTP_POST,
+                [this]() { _handleOtaPost(); },
+                [this]() { _handleOtaUpload(); }
+            );
+        }
+
         // Sondas de portal cautivo de Android, iOS, Windows
         _server->on("/generate_204",             [this]() { _handleCaptiveRedirect(); });
         _server->on("/gen_204",                  [this]() { _handleCaptiveRedirect(); });
@@ -848,4 +861,126 @@ void Net::_handleCaptiveRedirect() {
     // detecte el portal y muestre la notificación.
     _server->sendHeader("Location", "http://" + AP_IP.toString() + "/", true);
     _server->send(302, "text/plain", "");
+}
+
+// ================================================================
+//  _handleOtaGet() — sirve el formulario de subida de firmware
+// ================================================================
+void Net::_handleOtaGet() {
+    if (!_server->authenticate(OTA_USUARIO, OTA_CLAVE)) {
+        _server->requestAuthentication();
+        return;
+    }
+
+    String html =
+        "<!DOCTYPE html><html lang='es'>"
+        "<head>"
+        "<meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>espToy \xe2\x80\x94 Actualizar firmware</title>"
+        "<style>"
+        "*{box-sizing:border-box;margin:0;padding:0}"
+        "body{background:#121212;color:#e0e0e0;font-family:sans-serif;"
+        "display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px}"
+        ".card{background:#1e1e1e;border-radius:16px;padding:28px 24px;"
+        "max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,0.6)}"
+        "h1{font-size:1.4rem;font-weight:700;margin-bottom:6px;text-align:center}"
+        ".ver{color:#888;font-size:0.82rem;text-align:center;margin-bottom:22px}"
+        "label{display:block;font-size:0.85rem;color:#aaa;margin-bottom:8px}"
+        "input[type=file]{width:100%;background:#2a2a2a;border:1px solid #444;"
+        "border-radius:8px;color:#ccc;padding:10px 12px;font-size:0.9rem}"
+        ".btn{display:block;width:100%;margin-top:18px;padding:14px;border:none;"
+        "border-radius:10px;font-size:1.05rem;font-weight:600;cursor:pointer;"
+        "background:#5b9cf6;color:#000}"
+        ".btn:active{background:#3a7fd4}"
+        "</style>"
+        "</head>"
+        "<body><div class='card'>"
+        "<h1>espToy &#x1F916; Firmware</h1>"
+        "<p class='ver'>Versi\xc3\xb3n actual: " FW_VERSION "</p>"
+        "<form method='POST' action='/update' enctype='multipart/form-data'>"
+        "<label for='fw'>Seleccion\xc3\xa1 el archivo <strong>firmware.bin</strong>:</label>"
+        "<input type='file' id='fw' name='firmware' accept='.bin'>"
+        "<button type='submit' class='btn'>Actualizar</button>"
+        "</form>"
+        "</div></body></html>";
+
+    _server->send(200, "text/html; charset=utf-8", html);
+}
+
+// ================================================================
+//  _handleOtaPost() — responde al cliente con el resultado
+// ================================================================
+void Net::_handleOtaPost() {
+    if (!_server->authenticate(OTA_USUARIO, OTA_CLAVE)) {
+        _server->requestAuthentication();
+        return;
+    }
+
+    bool ok = !Update.hasError();
+
+    String html =
+        "<!DOCTYPE html><html lang='es'>"
+        "<head><meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>espToy \xe2\x80\x94 OTA</title>"
+        "<style>"
+        "body{background:#121212;color:#e0e0e0;font-family:sans-serif;"
+        "display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px}"
+        ".card{background:#1e1e1e;border-radius:16px;padding:28px 24px;"
+        "max-width:420px;width:100%;text-align:center}"
+        "h2{margin-bottom:12px}"
+        "p{color:#aaa;font-size:0.9rem}"
+        ".ok{color:#6fcf6f}"
+        ".err{color:#cf6f6f}"
+        "</style></head><body><div class='card'>";
+
+    if (ok) {
+        html += "<h2 class='ok'>&#10003; Actualizaci\xc3\xb3n exitosa</h2>"
+                "<p>El dispositivo se est\xc3\xa1 reiniciando...</p>";
+    } else {
+        html += "<h2 class='err'>&#10007; Error al actualizar</h2>"
+                "<p>Revis\xc3\xa1 el archivo y vuelv\xc3\xa1 a intentarlo.</p>"
+                "<p style='margin-top:14px'>"
+                "<a href='/update' style='color:#5b9cf6'>Volver</a></p>";
+    }
+
+    html += "</div></body></html>";
+
+    // Enviar respuesta antes de reiniciar (el keep-alive no importa aquí)
+    _server->sendHeader("Connection", "close");
+    _server->send(ok ? 200 : 500, "text/html; charset=utf-8", html);
+
+    if (ok) {
+        Serial.println("[ota] actualización correcta — reiniciando en 500 ms");
+        delay(500);
+        ESP.restart();
+    }
+}
+
+// ================================================================
+//  _handleOtaUpload() — recibe el .bin en fragmentos y lo escribe
+// ================================================================
+void Net::_handleOtaUpload() {
+    HTTPUpload& upload = _server->upload();
+
+    if (upload.status == UPLOAD_FILE_START) {
+        Serial.printf("[ota] inicio de subida: %s\n", upload.filename.c_str());
+        // UPDATE_SIZE_UNKNOWN: Update calcula el espacio necesario en tiempo real
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            Update.printError(Serial);
+        }
+
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            Update.printError(Serial);
+        }
+
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {   // true = fijar el boot partition
+            Serial.printf("[ota] subida completa: %u bytes\n", upload.totalSize);
+        } else {
+            Update.printError(Serial);
+        }
+    }
 }

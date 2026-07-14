@@ -179,6 +179,16 @@ static const uint32_t NTP_RESYNC_MS     = 24UL * 3600UL * 1000UL; // 1 vez por d
 static const char*    PORTAL_AP_SSID    = "espToy-setup";
 // El portal se levanta si no hay credenciales o falla la conexión.
 
+// ----- OTA por web (subir firmware desde el navegador) ---------
+// Para actualizar desde el teléfono:
+//   1. Conectarse al AP espToy-setup
+//   2. Abrir http://192.168.4.1/update
+//   3. Usuario: esptoy  /  Clave: esptoy
+//   4. Elegir el archivo firmware.bin y pulsar "Actualizar"
+static const bool  OTA_HABILITADO = true;
+static const char* OTA_USUARIO    = "esptoy";
+static const char* OTA_CLAVE      = "esptoy";
+
 // ----- Personalidad (doc 06 §3) --------------------------------
 // Valores iniciales y umbrales de rasgo
 static const uint8_t  PERSONALIDAD_INI            = 50;
