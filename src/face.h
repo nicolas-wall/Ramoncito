@@ -16,6 +16,14 @@ enum class Expression : uint8_t {
     ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO
 };
 
+// Gesto idle que puede estar activo mientras la cara está en LOOP
+enum class GestoIdle : uint8_t {
+    NINGUNO,      // sin gesto activo
+    BOSTEZO,      // válido en NEUTRAL y ABURRIDO
+    SACUDIDA,     // solo en NEUTRAL
+    MIRADA_FIJA   // solo en NEUTRAL
+};
+
 // Parámetros de un ojo (doc 03 §1.1).
 // Declarado fuera de Face para que las funciones auxiliares de face.cpp
 // puedan usarlo sin necesidad de acceso a miembros privados de la clase.
@@ -88,13 +96,26 @@ private:
     uint8_t    _blinkFrame;
     uint32_t   _blinkNextMs;
 
+    // Gestos idle (doc 03 §3.4)
+    GestoIdle _gesto;           // gesto actualmente en curso
+    uint32_t  _gestoInicioMs;   // millis() cuando empezó el gesto activo
+
+    // Timers de próximo disparo para cada gesto
+    uint32_t  _sigBostezo;
+    uint32_t  _sigSacudida;
+    uint32_t  _sigMiradaFija;
+
     // helpers internos
     static void lerpEye(EyeParams &cur, const EyeParams &tgt, float t);
     void drawEye(U8G2 &u8, const EyeParams &p);
     void scheduleNextBlink(uint32_t now);
     void scheduleNextGaze(uint32_t now);
+    void scheduleNextBostezo(uint32_t now);
+    void scheduleNextSacudida(uint32_t now);
+    void scheduleNextMiradaFija(uint32_t now);
     void cambiarExpresion(Expression e, uint32_t now);  // carga targets + INTRO
     void updateLoop(uint32_t now);                       // moduladores por expresión
+    void updateGestos(uint32_t now);                     // gestos idle (se llama tras updateLoop)
     void spawnParticula(uint8_t tipo, float x, float y,
                         float vx, float vy, uint16_t vidaMs, uint32_t now);
     void updateParticulas(uint32_t now);

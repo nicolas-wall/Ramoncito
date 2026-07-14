@@ -221,6 +221,27 @@ void Face::scheduleNextGaze(uint32_t now)
 }
 
 // ----------------------------------------------------------------
+//  Schedulers de gestos idle
+// ----------------------------------------------------------------
+void Face::scheduleNextBostezo(uint32_t now)
+{
+    uint32_t rango = GESTO_BOSTEZO_MAX_MS - GESTO_BOSTEZO_MIN_MS;
+    _sigBostezo = now + GESTO_BOSTEZO_MIN_MS + (uint32_t)(random((long)rango));
+}
+
+void Face::scheduleNextSacudida(uint32_t now)
+{
+    uint32_t rango = GESTO_SACUDIDA_MAX_MS - GESTO_SACUDIDA_MIN_MS;
+    _sigSacudida = now + GESTO_SACUDIDA_MIN_MS + (uint32_t)(random((long)rango));
+}
+
+void Face::scheduleNextMiradaFija(uint32_t now)
+{
+    uint32_t rango = GESTO_MIRADA_MAX_MS - GESTO_MIRADA_MIN_MS;
+    _sigMiradaFija = now + GESTO_MIRADA_MIN_MS + (uint32_t)(random((long)rango));
+}
+
+// ----------------------------------------------------------------
 //  Face::begin  —  estado inicial NEUTRAL
 // ----------------------------------------------------------------
 void Face::begin()
@@ -257,9 +278,16 @@ void Face::begin()
     _lastNow      = 0;
     limpiarParticulas();
 
+    // Gestos idle
+    _gesto          = GestoIdle::NINGUNO;
+    _gestoInicioMs  = 0;
+
     uint32_t now = millis();
     scheduleNextBlink(now);
     scheduleNextGaze(now);
+    scheduleNextBostezo(now);
+    scheduleNextSacudida(now);
+    scheduleNextMiradaFija(now);
 }
 
 // ----------------------------------------------------------------
@@ -296,6 +324,10 @@ void Face::cambiarExpresion(Expression e, uint32_t now)
     _animOffX = _animOffY = 0.0f;
     _sigSpawnMs   = now;          // el primer extra sale enseguida
     limpiarParticulas();
+
+    // Cancelar gesto activo al cambiar de expresión
+    // (los timers de próximo disparo siguen corriendo)
+    _gesto = GestoIdle::NINGUNO;
 }
 
 // ----------------------------------------------------------------
@@ -466,6 +498,126 @@ void Face::updateLoop(uint32_t now)
 }
 
 // ----------------------------------------------------------------
+//  Face::updateGestos — gestos idle (se llama desde update() tras updateLoop)
+//
+//  Disparo: solo si fase == LOOP, sin gesto activo, sin parpadeo en curso
+//  y la expresión es la permitida para ese gesto.
+//  Un solo gesto a la vez; al terminar se reprograma el timer.
+// ----------------------------------------------------------------
+void Face::updateGestos(uint32_t now)
+{
+    // ---- Disparo de nuevo gesto (solo si no hay ninguno activo) ----
+    if (_gesto == GestoIdle::NINGUNO &&
+        _fase   == AnimFase::LOOP    &&
+        _blinkState == BlinkState::IDLE)
+    {
+        // Bostezo: NEUTRAL o ABURRIDO
+        if ((int32_t)(now - _sigBostezo) >= 0 &&
+            (_expr == Expression::NEUTRAL || _expr == Expression::ABURRIDO))
+        {
+            _gesto         = GestoIdle::BOSTEZO;
+            _gestoInicioMs = now;
+            Serial.println("[face] gesto: bostezo");
+        }
+        // Sacudida: solo NEUTRAL
+        else if ((int32_t)(now - _sigSacudida) >= 0 &&
+                 _expr == Expression::NEUTRAL)
+        {
+            _gesto         = GestoIdle::SACUDIDA;
+            _gestoInicioMs = now;
+            Serial.println("[face] gesto: sacudida");
+        }
+        // Mirada fija: solo NEUTRAL
+        else if ((int32_t)(now - _sigMiradaFija) >= 0 &&
+                 _expr == Expression::NEUTRAL)
+        {
+            _gesto         = GestoIdle::MIRADA_FIJA;
+            _gestoInicioMs = now;
+            _gazeTgtX      = 0.0f;   // fuerza mirada al centro
+            _gazeTgtY      = 0.0f;
+            Serial.println("[face] gesto: mirada_fija");
+        }
+    }
+
+    // ---- Ejecución del gesto activo --------------------------------
+    if (_gesto == GestoIdle::NINGUNO) return;
+
+    uint32_t t = now - _gestoInicioMs;   // tiempo desde el inicio del gesto
+
+    switch (_gesto) {
+
+    // ---- BOSTEZO ------------------------------------------------
+    case GestoIdle::BOSTEZO: {
+        if (t < BOSTEZO_T_AGRANDA_MS) {
+            // Tramo 1 (0–400 ms): ojos se agrandan gradualmente hasta ×1.25
+            float progreso = (float)t / (float)BOSTEZO_T_AGRANDA_MS;
+            _animEscala = 1.0f + (BOSTEZO_ESCALA_MAX - 1.0f) * progreso;
+            _lidExtra   = 0.0f;
+
+        } else if (t < BOSTEZO_T_CIERRA_MS) {
+            // Tramo 2 (400–1200 ms): cierre lento + escala vuelve a 1.0
+            float dur     = (float)(BOSTEZO_T_CIERRA_MS - BOSTEZO_T_AGRANDA_MS);
+            float progreso = (float)(t - BOSTEZO_T_AGRANDA_MS) / dur;
+            _animEscala = BOSTEZO_ESCALA_MAX - (BOSTEZO_ESCALA_MAX - 1.0f) * progreso;
+            _lidExtra   = progreso * _leftTgt.h;   // párpado sube hasta tapar el ojo
+
+        } else if (t < BOSTEZO_T_CERRADO_MS) {
+            // Tramo 3 (1200–1500 ms): ojos cerrados quietos
+            _animEscala = 1.0f;
+            _lidExtra   = _leftTgt.h;
+
+        } else if (t < BOSTEZO_T_TOTAL_MS) {
+            // Tramo 4 (1500–1900 ms): reabre gradualmente
+            float dur      = (float)(BOSTEZO_T_TOTAL_MS - BOSTEZO_T_CERRADO_MS);
+            float progreso = (float)(t - BOSTEZO_T_CERRADO_MS) / dur;
+            _animEscala = 1.0f;
+            _lidExtra   = _leftTgt.h * (1.0f - progreso);
+
+        } else {
+            // Gesto terminado
+            _animEscala = 1.0f;
+            _lidExtra   = 0.0f;
+            _gesto      = GestoIdle::NINGUNO;
+            scheduleNextBostezo(now);
+        }
+        break;
+    }
+
+    // ---- SACUDIDA -----------------------------------------------
+    case GestoIdle::SACUDIDA: {
+        if (t < SACUDIDA_DURACION_MS) {
+            // Alterna ±amplitud cada frame (efecto de sacudida rápida)
+            _animOffX = ((t / 33) % 2 == 0) ? SACUDIDA_AMPLITUD_PX
+                                              : -SACUDIDA_AMPLITUD_PX;
+        } else {
+            _animOffX = 0.0f;
+            _gesto    = GestoIdle::NINGUNO;
+            scheduleNextSacudida(now);
+        }
+        break;
+    }
+
+    // ---- MIRADA_FIJA --------------------------------------------
+    case GestoIdle::MIRADA_FIJA: {
+        if (t < MIRADA_FIJA_DURACION_MS) {
+            // Mantiene mirada al centro y párpados levemente caídos
+            _gazeTgtX = 0.0f;
+            _gazeTgtY = 0.0f;
+            _lidExtra = _leftTgt.h * MIRADA_FIJA_LID_FRAC;
+        } else {
+            _lidExtra = 0.0f;
+            _gesto    = GestoIdle::NINGUNO;
+            scheduleNextMiradaFija(now);
+        }
+        break;
+    }
+
+    default:
+        break;
+    }
+}
+
+// ----------------------------------------------------------------
 //  Face::update  —  llamar una vez por frame (now = millis())
 // ----------------------------------------------------------------
 void Face::update(uint32_t now)
@@ -499,6 +651,9 @@ void Face::update(uint32_t now)
 
     // --- 3. Moduladores del loop por expresión -------------------
     updateLoop(now);
+
+    // --- 3b. Gestos idle (pisan moduladores del loop cuando aplica) ---
+    updateGestos(now);
 
     _gazeOffX += (_gazeTgtX - _gazeOffX) * EASING_MIRADA;
     _gazeOffY += (_gazeTgtY - _gazeOffY) * EASING_MIRADA;
@@ -536,8 +691,11 @@ void Face::update(uint32_t now)
                                  s_rightStyle == EyeStyle::CIRCULO_PUPILA);
     bool puedeParpardear = (estiloIzqParpadeaOk || estiloDerParpadeaOk);
     bool dormido = (_expr == Expression::DORMIDO);
+    // Durante bostezo y mirada fija el parpadeo queda suspendido
+    bool gestoSuspendeBlink = (_gesto == GestoIdle::BOSTEZO ||
+                               _gesto == GestoIdle::MIRADA_FIJA);
 
-    if (!dormido && puedeParpardear) {
+    if (!dormido && puedeParpardear && !gestoSuspendeBlink) {
         switch (_blinkState) {
 
         case BlinkState::IDLE:

@@ -63,9 +63,11 @@ static const uint32_t REACCION_NOCHE_FELIZ_MS   = 2000;   // duración cara FELI
 static const uint32_t REACCION_NOCHE_ENOJO_MS   = 2500;   // duración cara ENOJADO nocturna
 
 // ----- Inactividad y standby (pantalla apagada) ---------------
-static const uint32_t INACTIVIDAD_QUEHACER_MS = 30UL * 60UL * 1000UL; // 30 min sin interacción → cara SOSPECHOSO (§1.4)
-static const uint32_t INACTIVIDAD_STANDBY_MS  = 60UL * 60UL * 1000UL; // 1 h → pantalla off
-static const uint32_t DORMIDO_STANDBY_MS      = 20UL * 60UL * 1000UL; // 20 min durmiendo → off
+// Cada 10 min sin interacción → cara SOSPECHOSO ("¿qué pasa?"). Con el
+// standby a los 30 min, aparece a los 10 y 20 min antes del apagado.
+static const uint32_t INACTIVIDAD_QUEHACER_MS = 10UL * 60UL * 1000UL;
+static const uint32_t INACTIVIDAD_STANDBY_MS  = 30UL * 60UL * 1000UL; // 30 min despierto → pantalla off
+static const uint32_t DORMIDO_STANDBY_MS      = 15UL * 60UL * 1000UL; // 15 min durmiendo → off
 
 // ----- Animaciones idle (motor de ojos, doc 03) ---------------
 static const uint32_t PARPADEO_MIN_MS = 2000;
@@ -101,6 +103,33 @@ static const uint32_t ANIM_ZZZ_SPAWN_MS      = 900;   // DORMIDO: cadencia de Z
 static const uint16_t ANIM_ZZZ_VIDA_MS       = 2400;
 static const uint32_t ANIM_LAGRIMA_SPAWN_MS  = 4000;  // TRISTE: una lágrima cada 4 s
 static const uint16_t ANIM_LAGRIMA_VIDA_MS   = 2000;
+
+// ----- Gestos idle (doc 03 §3.4) --------------------------------
+// Intervalos entre disparos (aleatorios dentro del rango)
+static const uint32_t GESTO_BOSTEZO_MIN_MS    = 5UL  * 60UL * 1000UL;   //  5 min
+static const uint32_t GESTO_BOSTEZO_MAX_MS    = 10UL * 60UL * 1000UL;   // 10 min
+static const uint32_t GESTO_SACUDIDA_MIN_MS   = 8UL  * 60UL * 1000UL;   //  8 min
+static const uint32_t GESTO_SACUDIDA_MAX_MS   = 15UL * 60UL * 1000UL;   // 15 min
+static const uint32_t GESTO_MIRADA_MIN_MS     = 3UL  * 60UL * 1000UL;   //  3 min
+static const uint32_t GESTO_MIRADA_MAX_MS     = 7UL  * 60UL * 1000UL;   //  7 min
+
+// Duraciones internas del bostezo (tramos acumulados)
+static const uint32_t BOSTEZO_T_AGRANDA_MS    = 400;   // 0–400  ms: ojos se agrandan
+static const uint32_t BOSTEZO_T_CIERRA_MS     = 1200;  // 400–1200 ms: se cierran
+static const uint32_t BOSTEZO_T_CERRADO_MS    = 1500;  // 1200–1500 ms: quietos cerrados
+static const uint32_t BOSTEZO_T_TOTAL_MS      = 1900;  // 1500–1900 ms: reabre
+
+// Escala máxima del bostezo (los ojos se agrandan a ×1.25)
+static const float    BOSTEZO_ESCALA_MAX      = 1.25f;
+
+// Duración y amplitud de la sacudida de cabeza
+static const uint32_t SACUDIDA_DURACION_MS    = 260;
+static const float    SACUDIDA_AMPLITUD_PX    = 3.0f;
+
+// Duración de la mirada fija (párpados caídos, sin parpadeo)
+static const uint32_t MIRADA_FIJA_DURACION_MS = 4000;
+// Fracción de _leftTgt.h para el párpado levemente caído
+static const float    MIRADA_FIJA_LID_FRAC    = 0.15f;
 
 // ----- Sonido (buzzer pasivo por LEDC) -------------------------
 static const uint8_t  BUZZER_LEDC_CANAL = 0;
