@@ -16,6 +16,11 @@ struct MenuData {
     bool    wifiConfigurada;   // hay SSID guardado
     const char* ssid;          // SSID guardado ("" si no hay)
     bool    portalActivo;
+    // Campos de firmware / OTA (página 3)
+    const char* fwVersion;    // versión actual ("0.9.0")
+    bool    staConectada;     // STA conectada a un AP
+    bool    hayUpdate;        // hay actualización disponible
+    const char* versionNueva; // versión nueva ("" si no hay)
     // Rasgos de personalidad (Etapa C)
     uint8_t alegre;         // 0-100
     uint8_t grunon;         // 0-100
@@ -25,5 +30,5 @@ struct MenuData {
 };
 
 // Dibuja la pantalla de estado completa (no llama clearBuffer/sendBuffer)
-// pagina: 1 = stats actual, 2 = personalidad + edad
+// pagina: 1 = stats actual, 2 = personalidad + edad, 3 = WiFi + firmware
 void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina);

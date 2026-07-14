@@ -220,8 +220,72 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
         snprintf(anim4, sizeof(anim4), "Vagueza: %s", vagWord);
         u8.drawStr(0, 63, anim4);
 
-        // ── Indicador de página "2/2" ──
+        // ── Indicador de página "2/3" ──
         u8.setFont(u8g2_font_5x8_tf);
-        u8.drawStr(SCREEN_W - 15, SCREEN_H - 1, "2/2");
+        u8.drawStr(SCREEN_W - 15, SCREEN_H - 1, "2/3");
+
+    } else if (pagina == 3) {
+        // ── PÁGINA 3: WiFi + firmware ──
+
+        // ── HEADER ──
+        u8.setFont(u8g2_font_4x6_tf);
+        u8.drawStr(0, TITULO_Y, "WiFi y firmware");
+
+        // "3/3" alineado a la derecha en la misma línea del título
+        // Con fuente 4x6: "3/3" = 3 chars × 4 px = 12 px
+        u8.drawStr(SCREEN_W - 12, TITULO_Y, "3/3");
+
+        // ── LÍNEA SEPARADORA ──
+        u8.drawHLine(0, SEP_Y, SCREEN_W);
+
+        // ── LÍNEAS DE INFORMACIÓN ──
+        u8.setFont(u8g2_font_5x8_tf);
+
+        // Línea 1 (y=27): "Red: <ssid> <estado>"
+        // Estado: "OK" si staConectada; "portal" si portalActivo; "s/conex" si no.
+        // El SSID se trunca para que la línea entera entre en 128 px.
+        // Ancho fijo por estado: "OK"=2ch, "portal"=6ch, "s/conex"=7ch → usamos 7 como peor caso.
+        // "Red: " = 5ch; estado máx = 7ch + 1 espacio; queda: 128/5 - 5 - 1 - 7 = 12 chars para ssid.
+        {
+            const char* estado;
+            if (d.staConectada)   estado = "OK";
+            else if (d.portalActivo) estado = "portal";
+            else                  estado = "s/conex";
+
+            char ssidTrunc[13];  // 12 chars + '\0'
+            truncarSSID(ssidTrunc, d.ssid ? d.ssid : "", 12);
+
+            char redBuf[36];
+            snprintf(redBuf, sizeof(redBuf), "Red: %s %s", ssidTrunc, estado);
+            u8.drawStr(0, 27, redBuf);
+        }
+
+        // Línea 2 (y=39): "FW: v<fwVersion>"
+        {
+            char fwBuf[24];
+            snprintf(fwBuf, sizeof(fwBuf), "FW: v%s", d.fwVersion ? d.fwVersion : "?");
+            u8.drawStr(0, 39, fwBuf);
+        }
+
+        // Línea 3 (y=51): estado de actualización
+        {
+            if (d.hayUpdate) {
+                char updBuf[28];
+                snprintf(updBuf, sizeof(updBuf), "Nueva: v%s!", d.versionNueva ? d.versionNueva : "?");
+                u8.drawStr(0, 51, updBuf);
+            } else {
+                u8.drawStr(0, 51, "Firmware al dia");
+            }
+        }
+
+        // Línea 4 (y=63): instrucciones de acción
+        // Con fuente 5x8: "tocar cabeza: cambiar WiFi" = 26ch × 5 = 130 px → no entra.
+        // Usar fuente 4x6 para esta línea (4×26 = 104 px, entra bien).
+        u8.setFont(u8g2_font_4x6_tf);
+        if (d.hayUpdate) {
+            u8.drawStr(0, 63, "cabeza:WiFi pie:actualizar");
+        } else {
+            u8.drawStr(0, 63, "tocar cabeza: cambiar WiFi");
+        }
     }
 }

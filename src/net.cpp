@@ -400,6 +400,14 @@ void Net::startPortal() {
 }
 
 // ================================================================
+//  staConnected() — true si la STA está asociada a un AP
+//  (indica que hay internet disponible para el auto-OTA)
+// ================================================================
+bool Net::staConnected() const {
+    return WiFi.status() == WL_CONNECTED;
+}
+
+// ================================================================
 //  _cargarCredenciales() — leer ssid/pass de NVS
 // ================================================================
 void Net::_cargarCredenciales() {

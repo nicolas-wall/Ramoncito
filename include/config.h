@@ -7,7 +7,8 @@
 #include <Arduino.h>
 
 // ----- Versión ----------------------------------------------
-#define FW_VERSION "0.8.0-interaccion"
+// Semver puro: el parser de OTA compara major.minor.patch sin sufijos
+#define FW_VERSION "0.9.0"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
@@ -163,11 +164,11 @@ static const int  HORA_DESPERTAR = 7;   // ...hasta las 07:00
 static const long TZ_OFFSET_S    = -3L * 3600L;  // Argentina (UTC-3, sin DST)
 
 // ----- WiFi / NTP / Portal --------------------------------------
-// false = no intentar conectarse a ninguna red; solo levantar el AP de setup
-//         (espToy-setup) para dar la hora desde el teléfono. Ideal si el router
-//         es errático o de 5 GHz. true = intentar conectar a las credenciales
-//         guardadas y sincronizar por NTP.
-static const bool     WIFI_INTENTAR_STA = false;
+// true = intentar conectar a las credenciales guardadas y sincronizar por NTP.
+//        Se reactiva STA porque el auto-OTA desde GitHub Releases necesita
+//        internet; el portal captivo sigue disponible como fallback si la
+//        conexión falla o no hay credenciales configuradas.
+static const bool     WIFI_INTENTAR_STA = true;
 
 // 22 s: en modo STA puro (primer intento), asociar + DHCP en un router
 // 2.4 GHz congestionado puede tardar 15-20 s. Con 10 s se vencía y caía
@@ -188,6 +189,15 @@ static const char*    PORTAL_AP_SSID    = "espToy-setup";
 static const bool  OTA_HABILITADO = true;
 static const char* OTA_USUARIO    = "esptoy";
 static const char* OTA_CLAVE      = "esptoy";
+
+// ----- Auto-OTA desde GitHub Releases (doc: actualización de flota) -----
+// El dispositivo verifica periódicamente si hay una versión nueva en GitHub
+// y la descarga/instala de forma autónoma cuando está conectado a internet.
+static const bool     OTA_AUTO_HABILITADO   = true;
+static const char*    OTA_VERSION_URL  = "https://github.com/nicolas-wall/espToy/releases/latest/download/version.json";
+static const char*    OTA_FIRMWARE_URL = "https://github.com/nicolas-wall/espToy/releases/latest/download/firmware.bin";
+static const uint32_t OTA_CHECK_BOOT_MS      = 90UL * 1000UL;           // primer chequeo 90 s después del boot
+static const uint32_t OTA_CHECK_INTERVALO_MS = 24UL * 3600UL * 1000UL; // después, 1 vez por día
 
 // ----- Personalidad (doc 06 §3) --------------------------------
 // Valores iniciales y umbrales de rasgo

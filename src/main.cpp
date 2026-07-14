@@ -22,6 +22,7 @@
 //    i         imprime estado (incluye rasgos de personalidad)
 //    q         imprime rasgos + edad + factor de plasticidad
 //    q A G E P fija los 4 rasgos directamente (para pruebas)
+//    u         fuerza chequeo de auto-OTA inmediatamente
 // =============================================================
 
 #include <Arduino.h>
@@ -36,6 +37,7 @@
 #include "personality.h"
 #include "net.h"
 #include "menu.h"
+#include "ota.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
@@ -245,14 +247,46 @@ static void despacharEventos(uint32_t ahora) {
                     menuPagina = 2;
                     menuHasta = ahora + MENU_TIMEOUT_MS;
                     sound.play(Melody::BIP);
+                } else if (menuPagina == 2) {
+                    // Pasar a página 3
+                    menuPagina = 3;
+                    menuHasta = ahora + MENU_TIMEOUT_MS;
+                    sound.play(Melody::BIP);
                 } else {
-                    // menuPagina == 2: cerrar menú
+                    // menuPagina == 3: cerrar menú
                     appState = AppState::IDLE;
                     idleExprActual = mood.dominantExpression();
                     face.setExpression(idleExprActual);
                     sound.play(Melody::BIP);
                     marcarActividad(ahora);
                     entroADormirMs  = ahora;
+                }
+            } else if (menuPagina == 3) {
+                // Acciones táctiles solo en página 3
+                bool enLockout = (ultimoBotonMs != 0) &&
+                                 ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
+                if (enLockout) {
+                    Serial.println("[app] touch ignorado (lockout boton, menu p3)");
+                } else if (ev == InputEvent::TOUCH_START) {
+                    // Cabeza: cerrar menú y abrir portal WiFi
+                    appState = AppState::IDLE;
+                    idleExprActual = mood.dominantExpression();
+                    face.setExpression(idleExprActual);
+                    marcarActividad(ahora);
+                    entroADormirMs = ahora;
+                    net.startPortal();
+                    sound.play(Melody::BIP);
+                    reaccionar(Expression::SORPRENDIDO, 3000, "portal: espToy-setup", ahora);
+                } else if (ev == InputEvent::TICKLE_START && ota.hayActualizacion()) {
+                    // Pie: instalar actualización (bloqueante)
+                    sound.play(Melody::BIP);
+                    ota.instalarAhora();
+                    // Si vuelve acá, la instalación falló: cerrar el menú limpiamente
+                    appState = AppState::IDLE;
+                    idleExprActual = mood.dominantExpression();
+                    face.setExpression(idleExprActual);
+                    marcarActividad(ahora);
+                    entroADormirMs = ahora;
                 }
             }
             continue;
@@ -393,6 +427,10 @@ static void procesarComando(const char* cmd) {
                           personality.energetico(), personality.perezoso(),
                           personality.edadDias(), personality.plasticidadFactor());
         }
+    } else if (cmd[0] == 'u') {
+        // Forzar chequeo de auto-OTA inmediatamente
+        ota.forzarChequeo();
+        Serial.println("[cmd] chequeo OTA forzado");
     }
 }
 
@@ -433,6 +471,7 @@ void setup() {
     input.begin();
     face.begin();
     net.begin();
+    ota.begin(&u8g2);
 
     idleExprActual = mood.dominantExpression();
     face.setExpression(idleExprActual);
@@ -444,7 +483,7 @@ void setup() {
     scheduleSospechoso(ahora);
     sigMuestraPers = ahora + MOOD_TICK_MS / TIME_SCALE;
 
-    Serial.println("[app] listo — comandos: h N | m F E A | s | p | i | n | q | q A G E P");
+    Serial.println("[app] listo — comandos: h N | m F E A | s | p | i | n | q | q A G E P | u (OTA)");
 }
 
 // ------------------------------------------------------------
@@ -463,6 +502,13 @@ void loop() {
 
     // Módulos de fondo
     net.update(ahora);
+
+    // Auto-OTA: solo fuera del menú para no pisar su render con la pantalla
+    // de progreso. En IDLE o SLEEPING el chequeo bloqueante es aceptable.
+    if (appState != AppState::MENU) {
+        ota.update(ahora);
+    }
+
     // Descansando = sueño nocturno o siesta por agotamiento (cara DORMIDO):
     // en vez de decaer, recupera energía de a poco.
     bool descansando = (appState == AppState::SLEEPING) ||
@@ -627,6 +673,11 @@ void loop() {
         md.wifiConfigurada = net.hasCredentials();
         md.ssid            = net.ssidGuardado();
         md.portalActivo    = net.portalActive();
+        // Campos de firmware / OTA (página 3)
+        md.fwVersion    = FW_VERSION;
+        md.staConectada = net.staConnected();
+        md.hayUpdate    = ota.hayActualizacion();
+        md.versionNueva = ota.versionNueva();
         // Campos de personalidad (Etapa C)
         md.alegre      = personality.alegre();
         md.grunon      = personality.grunon();

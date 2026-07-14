@@ -42,6 +42,10 @@ public:
     // Fuerza el inicio del portal manualmente.
     void startPortal();
 
+    // true si la STA está conectada a un punto de acceso (internet disponible).
+    // Usado por el módulo OTA para saber si puede intentar la descarga.
+    bool staConnected() const;
+
     // Para el menú de estado:
     bool hasCredentials() const { return _ssid.length() > 0; }
     const char* ssidGuardado() const { return _ssid.c_str(); }
