@@ -177,9 +177,13 @@ void Ota::_chequear() {
     // Sin validación de CA: juguete de escritorio, simpleza intencional.
     // La integridad queda garantizada por el MD5 que verifica Update.setMD5().
     client.setInsecure();
+    client.setTimeout(15);   // s — el handshake TLS de GitHub puede ser lento
 
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    // GitHub encadena 302 + dos handshakes TLS: el default de 5 s da -11
+    http.setConnectTimeout(10000);
+    http.setTimeout(15000);
 
     Serial.printf("[ota] GET %s\n", OTA_VERSION_URL);
     if (!http.begin(client, OTA_VERSION_URL)) {
@@ -292,9 +296,12 @@ void Ota::_instalar() {
     WiFiClientSecure client;
     // Sin validación de CA (ver comentario de cabecera); integridad por MD5.
     client.setInsecure();
+    client.setTimeout(15);   // s — mismos timeouts largos que el chequeo
 
     HTTPClient http;
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http.setConnectTimeout(10000);
+    http.setTimeout(15000);
 
     Serial.printf("[ota] GET %s\n", OTA_FIRMWARE_URL);
     if (!http.begin(client, OTA_FIRMWARE_URL)) {
