@@ -18,6 +18,7 @@
 #include "ota.h"
 #include "config.h"
 #include "net.h"
+#include "sound.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
@@ -292,6 +293,11 @@ void Ota::_chequear() {
 // ================================================================
 void Ota::_instalar() {
     Serial.printf("[ota] instalando actualizacion a v%s...\n", _versionNueva);
+
+    // Silenciar el buzzer antes de bloquear el loop: durante la descarga+flasheo
+    // sound.update() no corre, así que cualquier nota en curso quedaría trabada
+    // sonando todo el rato (ruido molesto continuo).
+    sound.stop();
 
     WiFiClientSecure client;
     // Sin validación de CA (ver comentario de cabecera); integridad por MD5.
