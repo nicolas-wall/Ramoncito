@@ -200,9 +200,16 @@ void Net::update(uint32_t now) {
                 _ultimoError = "";
                 // El portal ya cumplió: cerrarlo si estaba activo
                 if (_portalActivo) _detenerPortal();
-                // Apagar WiFi para ahorrar energía y reducir ruido en el touch
-                WiFi.disconnect(true);
-                WiFi.mode(WIFI_OFF);
+                if (OTA_AUTO_HABILITADO) {
+                    // El auto-OTA necesita internet: mantener la STA viva
+                    // (solo se baja el AP). Costo: algo más de consumo y de
+                    // ruido en el touch; se revisará con la versión a batería.
+                    WiFi.mode(WIFI_STA);
+                } else {
+                    // Apagar WiFi para ahorrar energía y reducir ruido táctil
+                    WiFi.disconnect(true);
+                    WiFi.mode(WIFI_OFF);
+                }
                 _marcarHoraValida();
                 _estado = Estado::REPOSO;
 
@@ -256,6 +263,10 @@ void Net::update(uint32_t now) {
                     _reintentosRestantes = MAX_REINTENTOS_SILENCIOSOS;
                     _tInicioConexion = now - WIFI_TIMEOUT_MS; // timeout ya vencido: gate por _tUltimoBegin
                     _estado = Estado::CONECTANDO;
+                } else if (OTA_AUTO_HABILITADO && WiFi.status() == WL_CONNECTED) {
+                    // STA ya conectada: mantenerla viva para el auto-OTA
+                    WiFi.mode(WIFI_STA);
+                    _estado = Estado::REPOSO;
                 } else {
                     WiFi.disconnect(true);
                     WiFi.mode(WIFI_OFF);
@@ -315,8 +326,12 @@ void Net::update(uint32_t now) {
                         _ultimoError = "";
                         _marcarHoraValida();
                         _detenerPortal();
-                        WiFi.disconnect(true);
-                        WiFi.mode(WIFI_OFF);
+                        if (OTA_AUTO_HABILITADO) {
+                            WiFi.mode(WIFI_STA);   // mantener STA para el auto-OTA
+                        } else {
+                            WiFi.disconnect(true);
+                            WiFi.mode(WIFI_OFF);
+                        }
                         _estado = Estado::REPOSO;
                     }
                 }
