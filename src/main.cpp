@@ -38,6 +38,7 @@
 #include "net.h"
 #include "menu.h"
 #include "ota.h"
+#include "imu.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
@@ -470,6 +471,7 @@ void setup() {
     personality.begin();
     input.begin();
     face.begin();
+    imu.begin();   // requiere Wire ya iniciado; falla silenciosamente si no hay MPU
     net.begin();
     ota.begin(&u8g2);
 
@@ -501,6 +503,7 @@ void loop() {
     framesEnVentana++;
 
     // Módulos de fondo
+    imu.update(ahora);
     net.update(ahora);
 
     // Auto-OTA: solo fuera del menú para no pisar su render con la pantalla
@@ -536,6 +539,62 @@ void loop() {
     }
 
     despacharEventos(ahora);
+
+    // ── Eventos IMU (acelerómetro MPU6050) ──────────────────────
+    // Solo se procesan fuera del MENU (igual que los toques táctiles).
+    if (appState != AppState::MENU && imu.habilitado()) {
+
+        // LEVANTADO: detección conservadora — sorpresa breve
+        if (imu.huboLevantado()) {
+            if (appState == AppState::STANDBY) {
+                salirStandby(ahora);
+            } else if (appState == AppState::SLEEPING) {
+                // Misma lógica que caricia nocturna: reacción sin despertar
+                face.setExpression(Expression::SORPRENDIDO);
+                sound.play(Melody::BIP);
+                caraNocheHasta = ahora + 1500;
+                marcarActividad(ahora);
+                Serial.println("[imu] levantado (durmiendo) → SORPRENDIDO breve");
+            } else {
+                // IDLE o REACTING: sorpresa + BIP suave
+                sound.play(Melody::BIP);
+                reaccionar(Expression::SORPRENDIDO, 1500, "!", ahora);
+                Serial.println("[imu] levantado → SORPRENDIDO");
+            }
+        }
+
+        // SACUDIDA: distinguir leve (1–MAX-1) de excesiva (≥ MAX)
+        if (imu.huboSacudida()) {
+            if (appState == AppState::STANDBY) {
+                salirStandby(ahora);
+            } else if (appState == AppState::SLEEPING) {
+                // Sacudida durmiendo: enojo nocturno directo
+                personality.event(PersEvent::ENOJO_NOCTURNO);
+                face.setExpression(Expression::ENOJADO);
+                sound.play(Melody::ENOJADO);
+                caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
+                marcarActividad(ahora);
+                Serial.println("[imu] sacudida (durmiendo) → ENOJADO nocturno");
+            } else {
+                // Despierto: evaluar si fue excesiva según el contador de la ventana
+                if (imu.sacudidasEnVentana() >= IMU_SACUDIDA_MAX) {
+                    // Sacudida excesiva → enojo + malhumor (igual que cosquillas de más)
+                    malhumorHasta = ahora + personality.malhumorMs();
+                    personality.event(PersEvent::ENOJO_COSQUILLAS);
+                    sound.play(Melody::ENOJADO);
+                    reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
+                    Serial.printf("[imu] sacudida excesiva (%u) → ENOJADO + malhumor\n",
+                                  imu.sacudidasEnVentana());
+                } else {
+                    // Sacudida leve → sorpresa + BIP
+                    sound.play(Melody::BIP);
+                    reaccionar(Expression::SORPRENDIDO, REACCION_TOUCH_MS, "!", ahora);
+                    Serial.printf("[imu] sacudida leve (%u) → SORPRENDIDO\n",
+                                  imu.sacudidasEnVentana());
+                }
+            }
+        }
+    }
 
     // Expiración del malhumor: resetea el contador de cosquillas (§1.2)
     if (malhumorHasta != 0 && (int32_t)(ahora - malhumorHasta) >= 0) {

@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.2"
+#define FW_VERSION "0.9.3"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
@@ -198,6 +198,36 @@ static const char*    OTA_VERSION_URL  = "https://github.com/nicolas-wall/espToy
 static const char*    OTA_FIRMWARE_URL = "https://github.com/nicolas-wall/espToy/releases/latest/download/firmware.bin";
 static const uint32_t OTA_CHECK_BOOT_MS      = 90UL * 1000UL;           // primer chequeo 90 s después del boot
 static const uint32_t OTA_CHECK_INTERVALO_MS = 24UL * 3600UL * 1000UL; // después, 1 vez por día
+
+// ==== IMU (MPU6050 en GY-521) ====
+// Dirección I2C: AD0 a 3V3 → 0x69 (0x68 lo ocupa el RTC DS3231)
+static const uint8_t  IMU_ADDR = 0x69;
+
+// ── Sacudida ──────────────────────────────────────────────────
+// Umbral de magnitud de aceleración (en g) para detectar un golpe/sacudida.
+// En reposo el chip mide ~1 g (gravedad). Un sacudón típico da 2.5–4 g.
+static const float    IMU_SACUDIDA_UMBRAL      = 2.2f;   // g: por encima → sacudida
+
+// Debounce: tiempo mínimo entre dos picos contados (evita que un solo golpe
+// cuente varias veces por rebote mecánico).
+static const uint32_t IMU_SACUDIDA_DEBOUNCE_MS = 200;    // ms
+
+// Ventana de tiempo dentro de la cual se acumulan sacudidas consecutivas.
+// Si la siguiente sacudida llega antes de que expire esta ventana, se suma al contador.
+static const uint32_t IMU_SACUDIDA_VENTANA_MS  = 1500;   // ms
+
+// Umbral de sacudidas acumuladas en la ventana para disparar enojo en vez de sorpresa.
+// 1–(MAX-1) sacudidas → SORPRENDIDO; MAX o más → ENOJADO.
+static const uint8_t  IMU_SACUDIDA_MAX         = 3;      // golpes: ≥ 3 → enojo
+
+// ── Levantado ─────────────────────────────────────────────────
+// Banda de magnitud que indica movimiento moderado (alzar la mascota).
+// Por debajo de MIN → reposo; por encima de MAX → pico de sacudida (ignorar aquí).
+static const float    IMU_LEVANTADO_MIN        = 1.3f;   // g: por encima de reposo
+static const float    IMU_LEVANTADO_MAX        = 2.1f;   // g: debajo del umbral de sacudida
+
+// Debounce del evento "levantado": evita disparos repetidos al moverlo.
+static const uint32_t IMU_LEVANTADO_DEBOUNCE_MS = 3000;  // ms entre detecciones
 
 // ----- Personalidad (doc 06 §3) --------------------------------
 // Valores iniciales y umbrales de rasgo
