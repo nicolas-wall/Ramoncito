@@ -54,9 +54,6 @@ private:
     // Magnitud total de aceleración en g
     float    _magnitudG         = 0.0f;
 
-    // Orientación de reposo estimada (promedio de las primeras lecturas)
-    float    _reposoG           = 1.0f;  // ~1 g de gravedad en reposo
-
     // ── Sacudida ─────────────────────────────────────────────────
     uint32_t _ultimaSacudidaMs  = 0;    // timestamp del último pico detectado
     uint32_t _ventanaInicioMs   = 0;    // inicio de la ventana de conteo
@@ -65,9 +62,28 @@ private:
     // Flag de evento para huboSacudida() — lo setea update(), lo limpia huboSacudida()
     bool     _flagSacudida      = false;
 
-    // ── Levantado ─────────────────────────────────────────────────
-    uint32_t _ultimoLevantadoMs = 0;
+    // ── Levantado por orientación sostenida ──────────────────────
+    // Vector de gravedad filtrado por EMA (low-pass); se estabiliza
+    // en los primeros segundos al arrancar.
+    float    _gravX             = 0.0f;
+    float    _gravY             = 0.0f;
+    float    _gravZ             = 1.0f;  // arranca apuntando a gravedad nominal
+
+    // Baseline de orientación de reposo (se adapta muy lento cuando quieto)
+    float    _baseX             = 0.0f;
+    float    _baseY             = 0.0f;
+    float    _baseZ             = 1.0f;
+
+    // Timestamp desde el cual la orientación difiere del baseline de forma sostenida
+    uint32_t _levantadoDesdeMs  = 0;    // 0 = orientación dentro de la zona de reposo
+    bool     _enZonaLevantado   = false; // true si el ángulo supera el umbral
+
+    uint32_t _ultimoLevantadoMs = 0;    // debounce de detección
     bool     _flagLevantado     = false;
+
+    // Indica si el vector de gravedad ya está inicializado (primeros frames)
+    bool     _gravInicializada  = false;
+    uint8_t  _warmupFrames      = 0;    // contador de frames de calentamiento
 
     // ── Helpers internos ──────────────────────────────────────────
     bool _leerRegistros();          // lee 6 bytes de aceleración por Wire

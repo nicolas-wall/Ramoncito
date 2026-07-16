@@ -4,6 +4,7 @@
 
 #include "sound.h"
 #include "config.h"
+#include <Preferences.h>
 
 // =============================================================
 //  Definición de melodías
@@ -110,7 +111,21 @@ Sound sound;
 // =============================================================
 
 void Sound::begin() {
-    _habilitado = SONIDO_HABILITADO_DEFAULT;
+    // Cargar estado de sonido desde NVS (persiste entre reinicios)
+    {
+        Preferences prefs;
+        if (prefs.begin("snd", /*readOnly=*/true)) {
+            if (prefs.isKey("habilitado")) {
+                _habilitado = prefs.getBool("habilitado", SONIDO_HABILITADO_DEFAULT);
+            } else {
+                _habilitado = SONIDO_HABILITADO_DEFAULT;
+            }
+            prefs.end();
+        } else {
+            _habilitado = SONIDO_HABILITADO_DEFAULT;
+        }
+    }
+
     _tocando    = false;
     _melodia    = nullptr;
     _totalNotas = 0;
@@ -126,6 +141,15 @@ void Sound::begin() {
     Serial.printf("[sound] listo (habilitado=%d)\n", _habilitado ? 1 : 0);
 }
 
+// Guardar el estado de habilitado en NVS
+void Sound::_saveEnabled() {
+    Preferences prefs;
+    if (prefs.begin("snd", /*readOnly=*/false)) {
+        prefs.putBool("habilitado", _habilitado);
+        prefs.end();
+    }
+}
+
 void Sound::_iniciarNota() {
     if (_melodia == nullptr || _indice >= _totalNotas) {
         // Melodía terminada
@@ -137,7 +161,13 @@ void Sound::_iniciarNota() {
     const Nota& n = _melodia[_indice];
 
     if (n.hz > 0) {
+        // ledcWriteTone fija el duty al 50% (máximo); lo bajamos al porcentaje
+        // configurado en SOUND_VOLUMEN_PCT para reducir el volumen del buzzer.
         ledcWriteTone(BUZZER_LEDC_CANAL, n.hz);
+        // Duty máximo para resolución de BUZZER_LEDC_RES bits: 2^res - 1
+        uint32_t dutyMax = (1u << BUZZER_LEDC_RES) - 1u;
+        uint32_t dutyBajo = dutyMax * SOUND_VOLUMEN_PCT / 100u;
+        ledcWrite(BUZZER_LEDC_CANAL, dutyBajo);
     } else {
         // Pausa: silenciar sin detener el estado
         ledcWriteTone(BUZZER_LEDC_CANAL, 0);
@@ -200,6 +230,8 @@ void Sound::setEnabled(bool en) {
     if (!en) {
         stop();  // detener inmediatamente si se deshabilita
     }
+    // Persistir en NVS para que el estado survive al reinicio
+    _saveEnabled();
 }
 
 bool Sound::enabled() const {

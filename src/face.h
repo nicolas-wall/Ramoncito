@@ -14,7 +14,9 @@
 enum class Expression : uint8_t {
     NEUTRAL, FELIZ, TRISTE, ENOJADO, SORPRENDIDO,
     ABURRIDO, DORMIDO, SOSPECHOSO, AMOR, GUINO,
-    RISA   // risa por cosquillas ("^^" enérgico)
+    RISA,      // risa por cosquillas ("^^" enérgico)
+    MAREADO,   // ojos en espiral giratoria (@_@) — efecto mareo
+    ILUSIONADO // ojos grandes brillantes mirando arriba (cuando lo alzan)
 };
 
 // Gesto idle que puede estar activo mientras la cara está en LOOP

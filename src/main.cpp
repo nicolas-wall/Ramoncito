@@ -66,6 +66,11 @@ static uint32_t malhumorHasta   = 0;  // 0 = sin malhumor; > 0 = timestamp de ex
 // ----- Bloqueo táctil tras presionar botón ----------------------
 static uint32_t ultimoBotonMs   = 0;  // timestamp del último BTN_A_PRESS
 
+// ----- Long-press del botón en menú página 3 -------------------
+static bool     btnPulsado       = false;  // botón está físicamente presionado
+static uint32_t btnPulsadoDesde  = 0;      // millis() cuando se detectó el press
+static bool     longPressEjecutado = false; // flag: ya se hizo el toggle, ignorar release
+
 // ----- Expresiones aleatorias idle ----------------------------
 static uint32_t sigGuino       = 0;
 static uint32_t sigSospechoso  = 0;
@@ -158,7 +163,9 @@ static void despertar(uint32_t ahora) {
 
 // ------------------------------------------------------------
 static void entrarStandby() {
-    randExprActiva = false;
+    randExprActiva     = false;
+    btnPulsado         = false;   // cancelar long-press pendiente
+    longPressEjecutado = false;
     appState = AppState::STANDBY;
     u8g2.setPowerSave(1);
     Serial.println("[app] standby — pantalla apagada");
@@ -254,13 +261,13 @@ static void despacharEventos(uint32_t ahora) {
                     menuHasta = ahora + MENU_TIMEOUT_MS;
                     sound.play(Melody::BIP);
                 } else {
-                    // menuPagina == 3: cerrar menú
-                    appState = AppState::IDLE;
-                    idleExprActual = mood.dominantExpression();
-                    face.setExpression(idleExprActual);
-                    sound.play(Melody::BIP);
-                    marcarActividad(ahora);
-                    entroADormirMs  = ahora;
+                    // menuPagina == 3: iniciar temporizador de long-press.
+                    // La acción (cerrar menú o toggle sonido) se decide cuando
+                    // el botón se suelta o se alcanza el umbral de hold.
+                    btnPulsado         = true;
+                    btnPulsadoDesde    = ahora;
+                    longPressEjecutado = false;
+                    menuHasta          = ahora + MENU_TIMEOUT_MS; // renovar timeout
                 }
             } else if (menuPagina == 3) {
                 // Acciones táctiles solo en página 3
@@ -335,7 +342,7 @@ static void despacharEventos(uint32_t ahora) {
                         malhumorHasta = ahora + personality.malhumorMs();
                         personality.event(PersEvent::ENOJO_COSQUILLAS);
                         sound.play(Melody::ENOJADO);
-                        reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
+                        reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "", ahora);
                         // No aplicar mood positivo; no incrementar ticklesSeguidos
                     } else {
                         marcarActividad(ahora);
@@ -352,12 +359,12 @@ static void despacharEventos(uint32_t ahora) {
                             mood.apply(MoodEffect::COSQUILLAS_SEGUIDAS);
                             personality.event(PersEvent::ENOJO_COSQUILLAS);
                             sound.play(Melody::ENOJADO);
-                            reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
+                            reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "", ahora);
                         } else {
                             mood.apply(MoodEffect::COSQUILLAS);
                             personality.event(PersEvent::COSQUILLAS_OK);
                             sound.play(Melody::FELIZ);
-                            reaccionar(Expression::RISA, REACCION_TICKLE_MS, "jajaja", ahora);
+                            reaccionar(Expression::RISA, REACCION_TICKLE_MS, "", ahora);
                         }
                     }
                 }
@@ -540,31 +547,70 @@ void loop() {
 
     despacharEventos(ahora);
 
+    // ── Long-press del botón en menú página 3 (toggle sonido) ───
+    // btnPulsado se activa cuando se recibe BTN_A_PRESS en la página 3.
+    // Mientras el botón siga físicamente presionado (input.btnA()), se acumula
+    // tiempo. Al superar MENU_LONGPRESS_MS se ejecuta el toggle UNA sola vez
+    // (longPressEjecutado=true) para ignorar la subsiguiente acción de la soltada.
+    // Si el botón se suelta antes del umbral → press corto → cerrar menú.
+    if (btnPulsado) {
+        if (!input.btnA()) {
+            // El botón fue soltado
+            if (!longPressEjecutado) {
+                // Press corto: cerrar menú como antes
+                appState = AppState::IDLE;
+                idleExprActual = mood.dominantExpression();
+                face.setExpression(idleExprActual);
+                sound.play(Melody::BIP);
+                marcarActividad(ahora);
+                entroADormirMs = ahora;
+            }
+            // En cualquier caso, limpiar el estado de seguimiento
+            btnPulsado         = false;
+            longPressEjecutado = false;
+        } else if (!longPressEjecutado &&
+                   (ahora - btnPulsadoDesde) >= MENU_LONGPRESS_MS) {
+            // Umbral alcanzado: toggle de sonido (una sola vez)
+            longPressEjecutado = true;
+            bool nuevoEstado = !sound.enabled();
+            sound.setEnabled(nuevoEstado);
+            Serial.printf("[app] long-press menu p3: sonido %s\n",
+                          nuevoEstado ? "ON" : "OFF");
+            // Feedback: bip al activar, silencio al desactivar (obvio)
+            if (nuevoEstado) {
+                sound.play(Melody::BIP);
+            }
+        }
+        // Si btnPulsado && longPressEjecutado && input.btnA(): seguir esperando
+        // que lo suelten sin hacer nada más
+    }
+
     // ── Eventos IMU (acelerómetro MPU6050) ──────────────────────
     // Solo se procesan fuera del MENU (igual que los toques táctiles).
     if (appState != AppState::MENU && imu.habilitado()) {
 
-        // LEVANTADO: detección conservadora — sorpresa breve
+        // ── LEVANTADO: reacción según personalidad ───────────────
         if (imu.huboLevantado()) {
+            marcarActividad(ahora);
             if (appState == AppState::STANDBY) {
                 salirStandby(ahora);
             } else if (appState == AppState::SLEEPING) {
-                // Misma lógica que caricia nocturna: reacción sin despertar
+                // Levantado de noche: reacción breve sin despertar del todo
                 face.setExpression(Expression::SORPRENDIDO);
                 sound.play(Melody::BIP);
                 caraNocheHasta = ahora + 1500;
-                marcarActividad(ahora);
                 Serial.println("[imu] levantado (durmiendo) → SORPRENDIDO breve");
             } else {
-                // IDLE o REACTING: sorpresa + BIP suave
-                sound.play(Melody::BIP);
-                reaccionar(Expression::SORPRENDIDO, 1500, "!", ahora);
-                Serial.println("[imu] levantado → SORPRENDIDO");
+                // Despierto: cara única de "me alzaron" (ILUSIONADO), sin texto.
+                sound.play(Melody::FELIZ);
+                reaccionar(Expression::ILUSIONADO, REACCION_TOUCH_MS, "", ahora);
+                Serial.println("[imu] levantado → ILUSIONADO");
             }
         }
 
-        // SACUDIDA: distinguir leve (1–MAX-1) de excesiva (≥ MAX)
+        // ── SACUDIDA: leve / excesiva según personalidad ─────────
         if (imu.huboSacudida()) {
+            marcarActividad(ahora);
             if (appState == AppState::STANDBY) {
                 salirStandby(ahora);
             } else if (appState == AppState::SLEEPING) {
@@ -573,24 +619,33 @@ void loop() {
                 face.setExpression(Expression::ENOJADO);
                 sound.play(Melody::ENOJADO);
                 caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
-                marcarActividad(ahora);
                 Serial.println("[imu] sacudida (durmiendo) → ENOJADO nocturno");
             } else {
-                // Despierto: evaluar si fue excesiva según el contador de la ventana
-                if (imu.sacudidasEnVentana() >= IMU_SACUDIDA_MAX) {
-                    // Sacudida excesiva → enojo + malhumor (igual que cosquillas de más)
+                // Despierto: umbral de "excesiva" ajustado por personalidad.
+                // Un gruñón se marea con menos sacudidas; un energético aguanta más.
+                bool esGrunon    = Personality::esAlta(personality.grunon());
+                bool esEnergetico = Personality::esAlta(personality.energetico());
+
+                // Calcular umbral efectivo (mínimo 2 para que siempre haya zona "leve")
+                int8_t umbralExcesiva = (int8_t)IMU_SACUDIDA_MAX;
+                if (esGrunon)     umbralExcesiva -= 1;
+                if (esEnergetico) umbralExcesiva += 1;
+                if (umbralExcesiva < 2) umbralExcesiva = 2;
+
+                if (imu.sacudidasEnVentana() >= (uint8_t)umbralExcesiva) {
+                    // Sacudida excesiva → MAREADO + malhumor + sesgo a gruñón
                     malhumorHasta = ahora + personality.malhumorMs();
                     personality.event(PersEvent::ENOJO_COSQUILLAS);
                     sound.play(Melody::ENOJADO);
-                    reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "Basta!", ahora);
-                    Serial.printf("[imu] sacudida excesiva (%u) → ENOJADO + malhumor\n",
-                                  imu.sacudidasEnVentana());
+                    reaccionar(Expression::MAREADO, REACCION_BTN_MS, "", ahora);
+                    Serial.printf("[imu] sacudida excesiva (%u, umbral=%d) → MAREADO + malhumor\n",
+                                  imu.sacudidasEnVentana(), umbralExcesiva);
                 } else {
-                    // Sacudida leve → sorpresa + BIP
+                    // Sacudida leve → sorpresa (sin texto)
                     sound.play(Melody::BIP);
-                    reaccionar(Expression::SORPRENDIDO, REACCION_TOUCH_MS, "!", ahora);
-                    Serial.printf("[imu] sacudida leve (%u) → SORPRENDIDO\n",
-                                  imu.sacudidasEnVentana());
+                    reaccionar(Expression::SORPRENDIDO, REACCION_TOUCH_MS, "", ahora);
+                    Serial.printf("[imu] sacudida leve (%u) → SORPRENDIDO%s\n",
+                                  imu.sacudidasEnVentana(), esGrunon ? " (grunon irritado)" : "");
                 }
             }
         }
@@ -633,6 +688,9 @@ void loop() {
         face.setExpression(idleExprActual);
         marcarActividad(ahora);
         entroADormirMs  = ahora;  // después del menú, 30 min antes de standby
+        // Limpiar estado de long-press si el menú expiró con botón en p3
+        btnPulsado         = false;
+        longPressEjecutado = false;
     }
 
     // Transiciones dependientes de la hora
@@ -733,10 +791,11 @@ void loop() {
         md.ssid            = net.ssidGuardado();
         md.portalActivo    = net.portalActive();
         // Campos de firmware / OTA (página 3)
-        md.fwVersion    = FW_VERSION;
-        md.staConectada = net.staConnected();
-        md.hayUpdate    = ota.hayActualizacion();
-        md.versionNueva = ota.versionNueva();
+        md.fwVersion         = FW_VERSION;
+        md.staConectada      = net.staConnected();
+        md.hayUpdate         = ota.hayActualizacion();
+        md.versionNueva      = ota.versionNueva();
+        md.sonidoHabilitado  = sound.enabled();
         // Campos de personalidad (Etapa C)
         md.alegre      = personality.alegre();
         md.grunon      = personality.grunon();

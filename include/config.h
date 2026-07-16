@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.4"
+#define FW_VERSION "0.9.5"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
@@ -108,6 +108,33 @@ static const uint16_t ANIM_ZZZ_VIDA_MS       = 2400;
 static const uint32_t ANIM_LAGRIMA_SPAWN_MS  = 4000;  // TRISTE: una lágrima cada 4 s
 static const uint16_t ANIM_LAGRIMA_VIDA_MS   = 2000;
 
+// ----- Expresión ILUSIONADO (ojos brillantes al ser alzado) ------
+// Velocidad del pulso de brillo en el loop (rad/frame).
+// Con FRAME_MS=33 ms y vel=0.15 rad/frame → ~1 ciclo cada 1.4 s.
+static const float    ANIM_ILUSIONADO_VEL        = 0.15f;  // rad/frame del twinkle
+// Amplitud del pulso de escala (porcentaje): ±6% de tamaño para el "latido".
+static const float    ANIM_ILUSIONADO_PULSO       = 0.06f;  // ±6 % de escala
+// Desplazamiento vertical del highlight dentro del ojo (arriba del centro).
+// Valor positivo en U8g2 = hacia abajo; usamos negativo = hacia arriba.
+static const float    ANIM_ILUSIONADO_HIGHLIGHT_OY = -4.5f; // px arriba del centro
+// Desplazamiento horizontal del highlight (hacia la esquina interior).
+static const float    ANIM_ILUSIONADO_HIGHLIGHT_OX = -3.5f; // px hacia la izquierda
+// Radio base del highlight en reposo (disco relleno pequeño).
+static const float    ANIM_ILUSIONADO_HIGHLIGHT_R  = 2.5f;  // px
+
+// ----- Expresión MAREADO (ojos en espiral giratoria) -----------
+// Número de vueltas de la espiral en cada ojo (controla cuán densa es).
+static const float    ANIM_MAREADO_VUELTAS     = 2.5f;   // vueltas de la espiral
+// Paso angular entre puntos consecutivos de la espiral (rad).
+// Valores chicos = espiral más suave pero más operaciones; ~0.25 rad es buen balance.
+static const float    ANIM_MAREADO_PASO_RAD    = 0.25f;  // rad entre puntos
+// Factor de escala del radio por unidad de ángulo (qué tan abierta es la espiral).
+// A mayor valor, la espiral ocupa más del área del ojo.
+static const float    ANIM_MAREADO_K           = 1.4f;   // px/rad (radio = k * t)
+// Velocidad de rotación de la espiral en el loop (rad/frame).
+// Con FRAME_MS=33 ms y vel=0.08 rad/frame → ~1 vuelta cada 2.6 s.
+static const float    ANIM_MAREADO_VEL_ROT     = 0.08f;  // rad/frame de giro del remolino
+
 // ----- Gestos idle (doc 03 §3.4) --------------------------------
 // Intervalos entre disparos (aleatorios dentro del rango)
 static const uint32_t GESTO_BOSTEZO_MIN_MS    = 5UL  * 60UL * 1000UL;   //  5 min
@@ -139,6 +166,14 @@ static const float    MIRADA_FIJA_LID_FRAC    = 0.15f;
 static const uint8_t  BUZZER_LEDC_CANAL = 0;
 static const uint8_t  BUZZER_LEDC_RES   = 8;     // bits de resolución
 static const bool     SONIDO_HABILITADO_DEFAULT = true; // sin buzzer no molesta
+// Volumen del buzzer pasivo: porcentaje del duty máximo (2^8-1 = 255).
+// Al 50% ledcWriteTone fuerza el máximo; bajando el duty se reduce el volumen.
+// 20% ≈ duty=51 → audible pero no agresivo. Rango recomendado: 10-35.
+static const uint8_t  SOUND_VOLUMEN_PCT = 10;    // porcentaje de duty máximo (0-100)
+
+// ----- Menú — long-press del botón en página 3 -----------------
+// Tiempo mínimo mantenido para disparar la acción de long-press (toggle sonido).
+static const uint32_t MENU_LONGPRESS_MS = 800;   // ms presionado para reconocer long-press
 
 // ----- Cerebro Tamagotchi (mood, doc 02/03) --------------------
 // Decaimiento POR TICK de 5 minutos (escalado por TIME_SCALE).
@@ -206,7 +241,7 @@ static const uint8_t  IMU_ADDR = 0x69;
 // ── Sacudida ──────────────────────────────────────────────────
 // Umbral de magnitud de aceleración (en g) para detectar un golpe/sacudida.
 // En reposo el chip mide ~1 g (gravedad). Un sacudón típico da 2.5–4 g.
-static const float    IMU_SACUDIDA_UMBRAL      = 2.2f;   // g: por encima → sacudida
+static const float    IMU_SACUDIDA_UMBRAL      = 1.8f;   // g: por encima → sacudida
 
 // Debounce: tiempo mínimo entre dos picos contados (evita que un solo golpe
 // cuente varias veces por rebote mecánico).
@@ -220,13 +255,31 @@ static const uint32_t IMU_SACUDIDA_VENTANA_MS  = 1500;   // ms
 // 1–(MAX-1) sacudidas → SORPRENDIDO; MAX o más → ENOJADO.
 static const uint8_t  IMU_SACUDIDA_MAX         = 3;      // golpes: ≥ 3 → enojo
 
-// ── Levantado ─────────────────────────────────────────────────
-// Banda de magnitud que indica movimiento moderado (alzar la mascota).
-// Por debajo de MIN → reposo; por encima de MAX → pico de sacudida (ignorar aquí).
-static const float    IMU_LEVANTADO_MIN        = 1.3f;   // g: por encima de reposo
-static const float    IMU_LEVANTADO_MAX        = 2.1f;   // g: debajo del umbral de sacudida
+// ── Levantado por orientación sostenida ───────────────────────
+// La detección ya no usa banda de magnitud sino comparación de ángulo
+// entre la dirección actual de la gravedad filtrada y el baseline de reposo.
 
-// Debounce del evento "levantado": evita disparos repetidos al moverlo.
+// Suavizado EMA rápido para seguir la gravedad frame a frame.
+// Alpha chico = más suavizado (sacudidas no desplazan el vector filtrado).
+static const float    IMU_GRAV_ALPHA           = 0.05f;  // factor EMA de gravedad filtrada
+
+// Suavizado EMA muy lento para adaptar el baseline de reposo cuando quieto.
+// Permite que el baseline se ajuste si el juguete queda en una nueva posición.
+static const float    IMU_BASE_ALPHA           = 0.002f; // factor EMA del baseline (≈0.2 % por frame)
+
+// Número de frames iniciales para promediar y establecer el baseline.
+// Con FRAME_MS=33 ms: 20 frames ≈ 660 ms de calentamiento.
+static const uint8_t  IMU_GRAV_WARMUP_FRAMES   = 20;     // frames de calentamiento al arrancar
+
+// Ángulo mínimo de desvío de orientación para considerar que alzaron el juguete.
+// 25° equivale a un giro notable: apoyado en mesa vs. sostenido en mano.
+static const float    IMU_LEVANTADO_ANGULO_GRADOS = 25.0f; // grados
+
+// Tiempo mínimo que el ángulo debe superar el umbral de forma sostenida.
+// Filtra movimientos breves (sacudida), que no desplazan el EMA más de 0.3-0.5 s.
+static const uint32_t IMU_LEVANTADO_SOSTEN_MS  = 400;    // ms sostenido para confirmar
+
+// Debounce del evento "levantado": evita disparos repetidos si lo sostienen.
 static const uint32_t IMU_LEVANTADO_DEBOUNCE_MS = 3000;  // ms entre detecciones
 
 // ----- Personalidad (doc 06 §3) --------------------------------

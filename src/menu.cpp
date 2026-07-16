@@ -278,14 +278,21 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
             }
         }
 
-        // Línea 4 (y=63): instrucciones de acción
-        // Con fuente 5x8: "tocar cabeza: cambiar WiFi" = 26ch × 5 = 130 px → no entra.
-        // Usar fuente 4x6 para esta línea (4×26 = 104 px, entra bien).
+        // Línea 4 (y=63): estado de sonido + hint de acción
+        // Con fuente 4x6 (4 px/char): cabe ~32 chars en 128 px.
+        // "son:off  cabeza:WiFi pie:actlz" = 30 chars → entra.
         u8.setFont(u8g2_font_4x6_tf);
-        if (d.hayUpdate) {
-            u8.drawStr(0, 63, "cabeza:WiFi pie:actualizar");
-        } else {
-            u8.drawStr(0, 63, "tocar cabeza: cambiar WiFi");
+        {
+            const char* sonStr = d.sonidoHabilitado ? "on " : "off";
+            if (d.hayUpdate) {
+                char buf[36];
+                snprintf(buf, sizeof(buf), "son:%s  cab:WiFi pie:actualiz", sonStr);
+                u8.drawStr(0, 63, buf);
+            } else {
+                char buf[36];
+                snprintf(buf, sizeof(buf), "son:%s  mantener:toggle son.", sonStr);
+                u8.drawStr(0, 63, buf);
+            }
         }
     }
 }

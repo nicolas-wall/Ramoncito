@@ -40,6 +40,7 @@ private:
     // Métodos internos
     void _iniciarNota();
     void _silenciar();
+    void _saveEnabled();  // persiste _habilitado en NVS
 };
 
 // Instancia global

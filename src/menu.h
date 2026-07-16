@@ -21,6 +21,7 @@ struct MenuData {
     bool    staConectada;     // STA conectada a un AP
     bool    hayUpdate;        // hay actualización disponible
     const char* versionNueva; // versión nueva ("" si no hay)
+    bool    sonidoHabilitado; // estado del sonido (página 3)
     // Rasgos de personalidad (Etapa C)
     uint8_t alegre;         // 0-100
     uint8_t grunon;         // 0-100
