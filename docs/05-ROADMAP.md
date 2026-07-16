@@ -109,8 +109,8 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 - [x] Implementar `stop()` para cortar el sonido
 - [x] Definir tabla de sonidos por evento — 10 melodías: BOOT, FELIZ, TRISTE, ENOJADO, AMOR, SORPRESA, DORMIR, DESPERTAR, RONQUIDO, BIP
 - [x] Verificar que el sonido es no bloqueante (31 fps constantes con play() activo)
-- [x] Flag de mute: `sound.setEnabled()` + comando serial `s`
-- [ ] **Prueba auditiva pendiente**: conectar el buzzer pasivo (D3/GPIO4 + GND) — el código ya lo ejercita, solo falta escucharlo
+- [x] Flag de mute: `sound.setEnabled()` + comando serial `s`; toggle desde menú p3 (long-press)
+- [x] **Sonido verificado en hardware** — buzzer pasivo funcionando con las melodías definidas
 
 **Sabés que está lista cuando:** cada evento produce su sonido distintivo sin interrumpir la animación en pantalla. Si el buzzer no está disponible, setear `soundEnabled = false` y avanzar.
 
@@ -246,14 +246,20 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 ---
 
+## Novedades recientes (post-Etapa 8)
+
+- [x] **OTA por GitHub Releases** — chequeo automático en boot + cada 24 h; confirmación táctil en menú p3; descarga e instala sobre HTTPS. (`src/ota.cpp`, `src/net.cpp`)
+- [x] **IMU MPU6050** — sacudida (leve → SORPRENDIDO, excesiva → MAREADO + malhumor), levantado por orientación (→ ILUSIONADO), reacciones nocturnas. (`src/imu.cpp`) **Implementado y compilado; verificación en hardware pendiente.**
+- [x] **Eliminación de Pong** — código muerto eliminado; el combo A+B ya no existe. (`src/pong.cpp/.h` borrados)
+- [x] **Renacer** — doble confirmación táctil desde menú p2 (cabeza → pantalla de aviso, pie → confirma); resetea personalidad + humor + fecha de nacimiento a cero; dispara animación de nacimiento. (`main.cpp`, `personality.cpp`, `mood.cpp`)
+- [x] **Animación de nacimiento** — secuencia 3 fases ~2.2 s: DORMIDO → pop SORPRENDIDO → FELIZ; se dispara al renacer y la primera vez que llega hora NTP si el juguete no tenía fecha de nacimiento.
+
 ## Fase v2 — Backlog (sesiones futuras)
 
 No empezar hasta completar Etapa 8. Estas funcionalidades requieren Etapas 0-8 estables.
 
-- [ ] **IMU MPU6050** — conectar por I2C (dirección 0x68), leer acelerómetro:
-  - Sacudida fuerte → expresión `SURPRISED` + sonido de susto
-  - Inclinación sostenida → expresión `SAD` (mareado)
-  - Detección de "panza arriba" → expresión de protesta
+- [ ] **IMU MPU6050** (backlog v2 original — ya implementado, ver arriba)
+- [x] Sacudida, levantado, reacción nocturna — implementados
 - [ ] **Space Invaders** — segundo minijuego, segundo combo secreto (ej. touch + botón A 3 s):
   - Oleadas de sprites enemigos 8x8
   - Botón A = moverse, botón B = disparar (o tap touch)

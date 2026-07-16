@@ -39,7 +39,8 @@ enum class EyeStyle : uint8_t {
     SLAB,            // barra rectangular delgada e inclinada (SOSPECHOSO — ojo entrecerrado)
     CRUZ,            // X — dos líneas diagonales gruesas (reservado / error)
     ESPIRAL,         // remolino "@" — espiral giratoria animada (MAREADO)
-    CIRCULO_BRILLO,  // disco grande con highlight blanco interno (ILUSIONADO — ojos brillantes)
+    CIRCULO_BRILLO,  // disco grande con estrella/destello blanco interno (ILUSIONADO — ojos brillantes)
+    MEDIALUNA,       // ojo recortado en su parte inferior por un arco negro (FELIZ — sonrisa en los ojos)
 };
 
 // ----------------------------------------------------------------
@@ -78,11 +79,13 @@ static const ExprDef EXPR_TABLE[13] = {
       0, 0, 0, 0, EyeStyle::RECT,
       28, 22, 6 },
 
-    // 1 — FELIZ: ojos sonrientes entrecerrados — párpado inferior subido (pBot=7)
-    //   simula mejillas de sonrisa; pTop=0 (parte superior libre).
-    { 0, 7, 0, 0, EyeStyle::RECT,
-      0, 7, 0, 0, EyeStyle::RECT,
-      28, 20, 8 },
+    // 1 — FELIZ: ojos en medialuna — disco blanco con la parte inferior tapada por un arco
+    //   negro desplazado hacia abajo, dejando visible solo la mitad superior del ojo.
+    //   El resultado es una medialuna que mira hacia arriba (mejillas de sonrisa).
+    //   w=28 h=22 r=11 mantienen el tamaño anterior; MEDIALUNA ignora pTop/pBot.
+    { 0, 0, 0, 0, EyeStyle::MEDIALUNA,
+      0, 0, 0, 0, EyeStyle::MEDIALUNA,
+      28, 22, 11 },
 
     // 2 — TRISTE: párpados externos muy caídos (rect con pendiente fuerte)
     //   Convenio de slopeTop: valor > 0 → el lado DERECHO del párpado sube
@@ -132,12 +135,13 @@ static const ExprDef EXPR_TABLE[13] = {
       18, 0, 0, 0, EyeStyle::RECT,
       28, 22, 6 },
 
-    // 10 — RISA (cosquillas): ojos muy entrecerrados de risa — como FELIZ pero
-    //   más apretados (pBot=8 sobre h=16) y con rebote más enérgico + "jajaja".
-    //   Sin arcos: al usuario no le gustan los semicírculos de la vieja FELIZ.
-    { 0, 8, 0, 0, EyeStyle::RECT,
-      0, 8, 0, 0, EyeStyle::RECT,
-      28, 16, 8 },
+    // 10 — RISA (cosquillas): ojos apretados de carcajada "^  ^" (arco hacia arriba),
+    //   el estilo clásico de reírse fuerte. Sin boca: la risa se lee por los ojos
+    //   cerrados en arco + el rebote vertical enérgico del loop.
+    //   Distinto de FELIZ (medialuna llena y curva): aquí los ojos son arcos finos apretados.
+    { 0, 0, 0, 0, EyeStyle::ARCO_ARRIBA,
+      0, 0, 0, 0, EyeStyle::ARCO_ARRIBA,
+      28, 16, 0 },
 
     // 11 — MAREADO: ojos en espiral giratoria "@_@" — efecto mareo clásico.
     //   El dibujo de la espiral se hace en drawEyeEspiral() animada por _loopPhase.
@@ -751,11 +755,13 @@ void Face::update(uint32_t now)
     bool estiloIzqParpadeaOk = (s_leftStyle  == EyeStyle::RECT ||
                                  s_leftStyle  == EyeStyle::CIRCULO ||
                                  s_leftStyle  == EyeStyle::CIRCULO_PUPILA ||
-                                 s_leftStyle  == EyeStyle::CIRCULO_BRILLO);
+                                 s_leftStyle  == EyeStyle::CIRCULO_BRILLO ||
+                                 s_leftStyle  == EyeStyle::MEDIALUNA);
     bool estiloDerParpadeaOk = (s_rightStyle == EyeStyle::RECT ||
                                  s_rightStyle == EyeStyle::CIRCULO ||
                                  s_rightStyle == EyeStyle::CIRCULO_PUPILA ||
-                                 s_rightStyle == EyeStyle::CIRCULO_BRILLO);
+                                 s_rightStyle == EyeStyle::CIRCULO_BRILLO ||
+                                 s_rightStyle == EyeStyle::MEDIALUNA);
     // ESPIRAL (MAREADO) no parpadea — el remolino debe verse continuo
     if (s_leftStyle  == EyeStyle::ESPIRAL) estiloIzqParpadeaOk = false;
     if (s_rightStyle == EyeStyle::ESPIRAL) estiloDerParpadeaOk = false;
@@ -963,15 +969,16 @@ static void drawEyeCirculoPupila(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
 }
 
 // ----------------------------------------------------------------
-//  drawEyeCirculoBrillo — disco grande con highlight blanco (ILUSIONADO)
+//  drawEyeCirculoBrillo — disco grande con estrella/destello (ILUSIONADO)
 //
 //  Técnica: disco blanco lleno (ojo grande abierto) + disco negro interior
-//  con un disco blanco pequeño desplazado arriba-izquierda (highlight).
-//  El efecto es el ojo clásico de "ilusión/emoción" de los personajes anime:
-//  iris grande y oscuro con un punto de luz (brillo) en la esquina superior.
+//  (iris oscuro) + estrella de 4 puntas blanca en la esquina superior-izquierda.
+//  El efecto es el ojo clásico de "ilusión/emoción" de los personajes anime.
 //
-//  El radio del highlight oscila frame a frame vía s_brilloR para el twinkle.
-//  ANIM_ILUSIONADO_HIGHLIGHT_OX/OY controlan la posición del brillo.
+//  La estrella se dibuja como dos cuñas (triángulos) cruzadas: una vertical
+//  y una horizontal, formando una ✦ de 4 puntas. El "tamaño" de la estrella
+//  (longitud de las puntas) escala con s_brilloR para el efecto twinkle.
+//  ANIM_ILUSIONADO_HIGHLIGHT_OX/OY controlan la posición del destello.
 // ----------------------------------------------------------------
 static void drawEyeCirculoBrillo(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
 {
@@ -990,16 +997,69 @@ static void drawEyeCirculoBrillo(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
     u8.setDrawColor(0);
     u8.drawDisc((u8g2_uint_t)cx, (u8g2_uint_t)cy, (u8g2_uint_t)rIris);
 
-    // 3. Highlight: disco blanco pequeño desplazado arriba-izquierda
-    //    ANIM_ILUSIONADO_HIGHLIGHT_OX/OY definen el offset desde el centro.
+    // 3. Estrella de 4 puntas blanca desplazada arriba-izquierda (destello ✦)
+    //    Longitud de las puntas: s_brilloR (oscila ~1.5..3.5 px con el twinkle).
+    //    Se dibuja como dos triángulos cruzados que se afinan hacia las puntas,
+    //    más un puntito central para reforzar el centro brillante.
     int16_t hx = cx + (int16_t)ANIM_ILUSIONADO_HIGHLIGHT_OX;
     int16_t hy = cy + (int16_t)ANIM_ILUSIONADO_HIGHLIGHT_OY;
-    int16_t hr = (int16_t)s_brilloR;
-    if (hr < 1) hr = 1;
-    // Clampar para que el highlight no salga del iris
-    if (hr > rIris - 1) hr = rIris - 1;
+    int16_t arm = (int16_t)s_brilloR;   // longitud de cada punta
+    if (arm < 1) arm = 1;
+    if (arm > rIris - 1) arm = rIris - 1;
+    int16_t stub = (arm > 1) ? 1 : 0;  // medio ancho en la base de cada triángulo
+
     u8.setDrawColor(1);
-    u8.drawDisc((u8g2_uint_t)hx, (u8g2_uint_t)hy, (u8g2_uint_t)hr);
+    // Cuña vertical (punta arriba y punta abajo)
+    u8.drawTriangle(hx,        hy - arm,   // punta superior
+                    hx - stub, hy,          // base izq
+                    hx + stub, hy);         // base der
+    u8.drawTriangle(hx,        hy + arm,   // punta inferior
+                    hx - stub, hy,
+                    hx + stub, hy);
+    // Cuña horizontal (punta izq y punta der)
+    u8.drawTriangle(hx - arm,  hy,          // punta izquierda
+                    hx,        hy - stub,   // base sup
+                    hx,        hy + stub);  // base inf
+    u8.drawTriangle(hx + arm,  hy,          // punta derecha
+                    hx,        hy - stub,
+                    hx,        hy + stub);
+    // Puntito central para reforzar el centro
+    u8.drawDisc((u8g2_uint_t)hx, (u8g2_uint_t)hy, 1);
+
+    u8.setDrawColor(1);
+}
+
+// ----------------------------------------------------------------
+//  drawEyeMedialuna — medialuna que abulta hacia arriba (FELIZ)
+//
+//  Técnica: disco blanco grande (ojo abierto) y luego se tapa la
+//  mitad inferior con un disco negro ligeramente más grande desplazado
+//  hacia abajo. El borde superior del disco negro recorta el ojo blanco
+//  dejando visible solo la parte superior — una medialuna que mira arriba,
+//  como si los cachetes subieran tapando la parte baja del ojo.
+//
+//  desplazamiento vertical del disco de corte: ~40 % del radio → medialuna
+//  bien definida, ni ojo casi entero ni línea fina.
+// ----------------------------------------------------------------
+static void drawEyeMedialuna(U8G2 &u8, int16_t cx, int16_t cy, int16_t w)
+{
+    int16_t rx = w / 2;
+    if (rx < 5) rx = 5;
+
+    // 1. Disco blanco lleno (el ojo completo)
+    u8.setDrawColor(1);
+    u8.drawDisc((u8g2_uint_t)cx, (u8g2_uint_t)cy, (u8g2_uint_t)rx);
+
+    // 2. Disco negro desplazado hacia abajo que recorta la mitad inferior.
+    //    El radio del disco de corte es igual al del ojo (rx) para que el
+    //    borde superior sea una curva suave y simétrica.
+    //    Desplazamiento: ~67 % del radio → corta menos abajo, deja el ojo
+    //    más lleno con una curva de sonrisa más suave.
+    int16_t corteOff = (rx * 2) / 3;   // ~67 % del radio hacia abajo
+    int16_t corteCy  = cy + corteOff;  // centro del disco de corte
+    int16_t corteR   = rx + 1;         // radio del corte ligeramente mayor
+    u8.setDrawColor(0);
+    u8.drawDisc((u8g2_uint_t)cx, (u8g2_uint_t)corteCy, (u8g2_uint_t)corteR);
 
     u8.setDrawColor(1);
 }
@@ -1237,6 +1297,10 @@ void Face::drawEye(U8G2 &u8, const EyeParams &pIn)
     case EyeStyle::CIRCULO_BRILLO:
         drawEyeCirculoBrillo(u8, cx, cy, w);
         break;
+
+    case EyeStyle::MEDIALUNA:
+        drawEyeMedialuna(u8, cx, cy, w);
+        break;
     }
 }
 
@@ -1341,49 +1405,9 @@ void Face::renderExtras(U8G2 &u8)
         }
         break;
 
-    case Expression::ILUSIONADO: {
-        // Sonrisa clara: arco "∪" (esquinas arriba, centro abajo) centrado en la
-        // cara. Manteniendo los ojos brillantes, da una carita feliz al ser alzado.
-        u8.setDrawColor(1);
-        int16_t bocaCx = 64;
-        int16_t bocaCy = 51;
-        int16_t bocaAncho = 22;
-        float ampBoca = 4.0f;   // profundidad de la sonrisa en píxeles
-        int16_t px0b = bocaCx - bocaAncho / 2;
-        int16_t py0b = bocaCy;
-        for (int16_t bx = 1; bx <= bocaAncho; bx++) {
-            float ang = (float)bx / (float)bocaAncho * 3.1416f;  // 0..π
-            int16_t px1b = bocaCx - bocaAncho / 2 + bx;
-            int16_t py1b = (int16_t)(bocaCy + ampBoca * sinf(ang));  // centro baja → sonrisa
-            u8.drawLine(px0b, py0b, px1b, py1b);
-            u8.drawLine(px0b, py0b + 1, px1b, py1b + 1);  // 2 px de grosor
-            px0b = px1b;
-            py0b = py1b;
-        }
-        break;
-    }
-
-    case Expression::MAREADO: {
-        // Boca ondulada tipo "~" en el centro inferior de la cara
-        // Se dibuja como una línea senoidal discreta de ~20 px de ancho.
-        u8.setDrawColor(1);
-        int16_t bocaCx = 64;
-        int16_t bocaCy = 54;
-        int16_t bocaAncho = 20;
-        // Amplitud de la onda oscila levemente para dar sensación de malestar
-        float ampOndaMarca = 2.5f + sinf((float)_lastNow * 0.004f) * 1.0f;
-        int16_t px0b = bocaCx - bocaAncho / 2;
-        int16_t py0b = bocaCy;
-        for (int16_t bx = 1; bx <= bocaAncho; bx++) {
-            float ang = (float)bx / (float)bocaAncho * 6.2832f;
-            int16_t px1b = bocaCx - bocaAncho / 2 + bx;
-            int16_t py1b = (int16_t)(bocaCy + ampOndaMarca * sinf(ang));
-            u8.drawLine(px0b, py0b, px1b, py1b);
-            px0b = px1b;
-            py0b = py1b;
-        }
-        break;
-    }
+    // ILUSIONADO, RISA y MAREADO: sin boca — la expresión la dan solo los ojos.
+    // (RISA: arcos "^  ^" apretados + rebote enérgico; MAREADO: espirales + tambaleo;
+    //  ILUSIONADO: discos grandes con estrella + mirada arriba.)
 
     default:
         break;

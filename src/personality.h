@@ -50,6 +50,10 @@ public:
     // Seteo directo de todos los rasgos para pruebas seriales; persiste en NVS
     void set(uint8_t alegre, uint8_t grunon, uint8_t energetico, uint8_t perezoso);
 
+    // Renacer completo: rasgos al default neutro, acumuladores a 0,
+    // birthEpoch = nowEpoch (0 si aún no hay hora válida). Persiste en NVS.
+    void renacer(time_t nowEpoch);
+
     // Accessores de solo lectura
     uint8_t alegre()      const { return _alegre;     }
     uint8_t grunon()      const { return _grunon;     }

@@ -4,7 +4,8 @@
 // Melodías disponibles para el buzzer pasivo
 enum class Melody : uint8_t {
     BOOT, FELIZ, TRISTE, ENOJADO, AMOR, SORPRESA,
-    DORMIR, DESPERTAR, RONQUIDO, BIP
+    DORMIR, DESPERTAR, RONQUIDO, BIP, TV_ON,
+    RISA   // carcajada "ja-ja-ja": notas cortas staccato alternadas
 };
 
 class Sound {

@@ -263,6 +263,42 @@ void Personality::set(uint8_t alegre, uint8_t grunon, uint8_t energetico, uint8_
 }
 
 // ─────────────────────────────────────────────────────────────
+//  renacer(): reseteo completo de personalidad y nacimiento
+// ─────────────────────────────────────────────────────────────
+
+void Personality::renacer(time_t nowEpoch) {
+    _alegre     = PERSONALIDAD_INI;
+    _grunon     = PERSONALIDAD_INI;
+    _energetico = PERSONALIDAD_INI;
+    _perezoso   = PERSONALIDAD_INI;
+
+    // Resetear acumuladores float para que no queden sesgos
+    _accAlegre = 0.0f;
+    _accGrunon = 0.0f;
+    _accEnerg  = 0.0f;
+    _accPerez  = 0.0f;
+
+    // nowEpoch=0 → sin hora válida todavía; quedará "s/edad" hasta NTP
+    _birthEpoch = nowEpoch;
+
+    Serial.printf("[pers] renacer -> A:%u G:%u E:%u P:%u birth:%lld\n",
+                  _alegre, _grunon, _energetico, _perezoso, (long long)_birthEpoch);
+
+    // Persistir inmediatamente (fuerza guardado de pBirth aunque sea 0)
+    Preferences prefs;
+    if (prefs.begin(PERS_NS, /*readOnly=*/false)) {
+        prefs.putUChar(PERS_ALEGRE, _alegre);
+        prefs.putUChar(PERS_GRUNON, _grunon);
+        prefs.putUChar(PERS_ENERG,  _energetico);
+        prefs.putUChar(PERS_PEREZ,  _perezoso);
+        prefs.putLong64(PERS_BIRTH, (int64_t)_birthEpoch);
+        prefs.end();
+    }
+    _dirty      = false;
+    _lastSaveMs = millis();
+}
+
+// ─────────────────────────────────────────────────────────────
 //  edadDias(): días completos desde el nacimiento
 // ─────────────────────────────────────────────────────────────
 

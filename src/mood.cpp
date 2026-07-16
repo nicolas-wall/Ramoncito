@@ -314,6 +314,23 @@ void Mood::noteTimeValid(time_t nowEpoch) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  reset(): reseteo completo al nacer — defaults de inicio
+// ─────────────────────────────────────────────────────────────
+
+void Mood::reset() {
+    _happiness      = MOOD_INI_FELICIDAD;
+    _energy         = MOOD_INI_ENERGIA;
+    _boredom        = MOOD_INI_ABURRIM;
+    _lastKnownEpoch = 0;
+    _timeValid      = false;
+
+    Serial.printf("[mood] reset() -> F:%u E:%u A:%u\n",
+                  _happiness, _energy, _boredom);
+
+    _saveToNVS();
+}
+
+// ─────────────────────────────────────────────────────────────
 //  set(): seteo directo para comandos seriales de test
 // ─────────────────────────────────────────────────────────────
 

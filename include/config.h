@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.5"
+#define FW_VERSION "0.9.6"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
@@ -175,6 +175,47 @@ static const uint8_t  SOUND_VOLUMEN_PCT = 10;    // porcentaje de duty máximo (
 // Tiempo mínimo mantenido para disparar la acción de long-press (toggle sonido).
 static const uint32_t MENU_LONGPRESS_MS = 800;   // ms presionado para reconocer long-press
 
+// Timeout de confirmación del renacer (página 2): si no llega el
+// segundo toque (pie) dentro de este tiempo, se cancela la operación.
+static const uint32_t MENU_RENACER_CONFIRM_MS = 6000;  // 6 s para confirmar
+
+// ----- Animación de nacimiento — encendido CRT -----------------
+// Duración total ~2.1 s dividida en 4 fases:
+//
+//   FASE 0 — punto→línea (~260 ms):
+//     Pantalla negra; una línea horizontal blanca de grosor 2 px
+//     crece desde el centro (px 64) hacia ambos lados hasta ocupar
+//     todo el ancho (128 px). Efecto "tubo calentándose".
+//
+//   FASE 1 — apertura vertical (~560 ms):
+//     La línea central se abre en vertical: rectángulo relleno blanco
+//     centrado en y=32, altura crece de 2 px hasta 64 px (pantalla
+//     llena → flash blanco). Sensación de "el tubo abre la imagen".
+//
+//   FASE 2 — estática CRT (~480 ms):
+//     Fondo negro con 150–250 píxeles blancos en posiciones aleatorias
+//     (ruido de sintonía). Algunas líneas horizontales de una sola
+//     fila refuerzan el look de scanlines retro.
+//
+//   FASE 3 — revelado de la cara (~820 ms):
+//     La carita aparece de arriba hacia abajo: se dibuja con
+//     face.render() y se tapa la parte inferior con un rectángulo
+//     negro cuya altura baja con el progreso (barrido de scanline).
+//     Al llegar al 100% la cara queda completa.
+//
+//   Al terminar → IDLE con FELIZ (igual que antes).
+static const uint32_t ANIM_NACIMIENTO_F0_MS = 260;   // ms línea horizontal crece
+static const uint32_t ANIM_NACIMIENTO_F1_MS = 560;   // ms apertura vertical (flash)
+static const uint32_t ANIM_NACIMIENTO_F2_MS = 480;   // ms estática/ruido CRT
+static const uint32_t ANIM_NACIMIENTO_F3_MS = 820;   // ms revelado de la cara
+static const uint32_t ANIM_NACIMIENTO_TOTAL_MS =
+    ANIM_NACIMIENTO_F0_MS + ANIM_NACIMIENTO_F1_MS +
+    ANIM_NACIMIENTO_F2_MS + ANIM_NACIMIENTO_F3_MS;
+// Cantidad de píxeles aleatorios en la fase de estática
+static const uint16_t ANIM_NACIMIENTO_RUIDO_PX  = 200;  // píxeles blancos por frame
+// Altura mínima de la línea inicial en la fase 1 (hereda de la fase 0)
+static const uint8_t  ANIM_NACIMIENTO_LINEA_GROSOR = 2;  // px de grosor de la línea CRT
+
 // ----- Cerebro Tamagotchi (mood, doc 02/03) --------------------
 // Decaimiento POR TICK de 5 minutos (escalado por TIME_SCALE).
 // (El tick de 1 min original agotaba la energía en <1 h — demasiado
@@ -315,6 +356,6 @@ static const uint8_t  PERSONALIDAD_ENOJO_ABUR_GRUNON = 50;  // gruñón alto: ab
 static const uint8_t  PERSONALIDAD_ENOJO_FEL_BASE    = 20;  // base normal: fel < 20
 static const uint8_t  PERSONALIDAD_ENOJO_ABUR_BASE   = 60;  // base normal: abur > 60
 // Cara FELIZ: felicidad > FELIZ_FEL y aburrimiento < FELIZ_ABUR (alegre alto más fácil)
-static const uint8_t  PERSONALIDAD_FELIZ_FEL_ALEGRE  = 60;  // alegre alto: fel > 60
+static const uint8_t  PERSONALIDAD_FELIZ_FEL_ALEGRE  = 85;  // feliz solo con fel > 85
 static const uint8_t  PERSONALIDAD_FELIZ_ABUR_BASE   = 40;  // compartido: abur < 40
-static const uint8_t  PERSONALIDAD_FELIZ_FEL_BASE    = 70;  // base normal: fel > 70
+static const uint8_t  PERSONALIDAD_FELIZ_FEL_BASE    = 85;  // feliz solo con fel > 85

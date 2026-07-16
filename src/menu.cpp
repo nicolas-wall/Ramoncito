@@ -172,57 +172,85 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
     } else if (pagina == 2) {
         // ── PÁGINA 2: Personalidad + edad ──
 
-        // ── HEADER ──
-        u8.setFont(u8g2_font_4x6_tf);
-        u8.drawStr(0, TITULO_Y, "Personalidad");
+        if (d.renacerConfirmando) {
+            // ── SUB-ESTADO: confirmación de renacer ──
+            // Pantalla entera de advertencia: dos toques para confirmar.
+            u8.setFont(u8g2_font_9x15B_tf);
+            // Centrar "RENACER?" horizontalmente
+            int rw = (int)u8.getStrWidth("RENACER?");
+            u8.drawStr((SCREEN_W - rw) / 2, 28, "RENACER?");
 
-        // Edad a la derecha: "N dias" o "en formacion"
-        u8.setFont(u8g2_font_5x8_tf);
-        char edadBuf[20];
-        if (d.edadDias < 0) {
-            snprintf(edadBuf, sizeof(edadBuf), "en formacion");
-        } else if (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION) {
-            snprintf(edadBuf, sizeof(edadBuf), "en formacion");
+            u8.setFont(u8g2_font_5x8_tf);
+            const char* linea2 = "borra todo";
+            int l2w = (int)u8.getStrWidth(linea2);
+            u8.drawStr((SCREEN_W - l2w) / 2, 42, linea2);
+
+            const char* linea3 = "pie=confirmar btn=cancelar";
+            // fuente 4x6 para que entre
+            u8.setFont(u8g2_font_4x6_tf);
+            int l3w = (int)u8.getStrWidth(linea3);
+            u8.drawStr((SCREEN_W - l3w) / 2, 56, linea3);
         } else {
-            snprintf(edadBuf, sizeof(edadBuf), "%d dias", d.edadDias);
+            // ── VISTA NORMAL DE PÁGINA 2 ──
+
+            // ── HEADER ──
+            u8.setFont(u8g2_font_4x6_tf);
+            u8.drawStr(0, TITULO_Y, "Personalidad");
+
+            // Edad a la derecha: siempre muestra el conteo de días.
+            // Solo si <0 (sin hora válida aún) muestra "s/edad".
+            // "*" indica que todavía está en período de formación.
+            u8.setFont(u8g2_font_5x8_tf);
+            char edadBuf[20];
+            if (d.edadDias < 0) {
+                snprintf(edadBuf, sizeof(edadBuf), "s/edad");
+            } else if (d.edadDias == 1) {
+                bool enForm = (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION);
+                snprintf(edadBuf, sizeof(edadBuf), "1 dia%s", enForm ? "*" : "");
+            } else {
+                bool enForm = (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION);
+                snprintf(edadBuf, sizeof(edadBuf), "%d dias%s", d.edadDias, enForm ? "*" : "");
+            }
+            int edadW = (int)u8.getStrWidth(edadBuf);
+            u8.drawStr(SCREEN_W - edadW - 2, FECHA_Y, edadBuf);
+
+            // ── LÍNEA SEPARADORA ──
+            u8.drawHLine(0, SEP_Y, SCREEN_W);
+
+            // ── 4 LÍNEAS DE RASGOS ──
+            // y = 27, 39, 51, 57 (últimas dos más juntas para dejar espacio al hint)
+            u8.setFont(u8g2_font_5x8_tf);
+
+            // Línea 1: Animo (alegre)
+            const char* animoWord = elegirPalabraRasgo(d.alegre, "serio", "alegre", "muy alegre");
+            char anim1[32];
+            snprintf(anim1, sizeof(anim1), "Animo: %s", animoWord);
+            u8.drawStr(0, 27, anim1);
+
+            // Línea 2: Genio (grunon)
+            const char* genioWord = elegirPalabraRasgo(d.grunon, "tranqui", "algo grunon", "muy grunon");
+            char anim2[32];
+            snprintf(anim2, sizeof(anim2), "Genio: %s", genioWord);
+            u8.drawStr(0, 37, anim2);
+
+            // Línea 3: Energia (energetico)
+            const char* enerWord = elegirPalabraRasgo(d.energetico, "calmo", "activo", "muy activo");
+            char anim3[32];
+            snprintf(anim3, sizeof(anim3), "Energia: %s", enerWord);
+            u8.drawStr(0, 47, anim3);
+
+            // Línea 4: Vagueza (perezoso)
+            const char* vagWord = elegirPalabraRasgo(d.perezoso, "inquieto", "algo vago", "muy vago");
+            char anim4[32];
+            snprintf(anim4, sizeof(anim4), "Vagueza: %s", vagWord);
+            u8.drawStr(0, 57, anim4);
+
+            // ── Hint de renacer + indicador de página "2/3" ──
+            // Línea inferior en 4x6: "cabeza:renacer  2/3"
+            u8.setFont(u8g2_font_4x6_tf);
+            u8.drawStr(0, SCREEN_H - 1, "cabeza:renacer");
+            u8.drawStr(SCREEN_W - 12, SCREEN_H - 1, "2/3");
         }
-        int edadW = (int)u8.getStrWidth(edadBuf);
-        u8.drawStr(SCREEN_W - edadW - 2, FECHA_Y, edadBuf);
-
-        // ── LÍNEA SEPARADORA ──
-        u8.drawHLine(0, SEP_Y, SCREEN_W);
-
-        // ── 4 LÍNEAS DE RASGOS ──
-        // y = 27, 39, 51, 63 (cada 12 px entre baselines)
-        u8.setFont(u8g2_font_5x8_tf);
-
-        // Línea 1: Animo (alegre)
-        const char* animoWord = elegirPalabraRasgo(d.alegre, "serio", "alegre", "muy alegre");
-        char anim1[32];
-        snprintf(anim1, sizeof(anim1), "Animo: %s", animoWord);
-        u8.drawStr(0, 27, anim1);
-
-        // Línea 2: Genio (grunon)
-        const char* genioWord = elegirPalabraRasgo(d.grunon, "tranqui", "algo grunon", "muy grunon");
-        char anim2[32];
-        snprintf(anim2, sizeof(anim2), "Genio: %s", genioWord);
-        u8.drawStr(0, 39, anim2);
-
-        // Línea 3: Energia (energetico)
-        const char* enerWord = elegirPalabraRasgo(d.energetico, "calmo", "activo", "muy activo");
-        char anim3[32];
-        snprintf(anim3, sizeof(anim3), "Energia: %s", enerWord);
-        u8.drawStr(0, 51, anim3);
-
-        // Línea 4: Vagueza (perezoso)
-        const char* vagWord = elegirPalabraRasgo(d.perezoso, "inquieto", "algo vago", "muy vago");
-        char anim4[32];
-        snprintf(anim4, sizeof(anim4), "Vagueza: %s", vagWord);
-        u8.drawStr(0, 63, anim4);
-
-        // ── Indicador de página "2/3" ──
-        u8.setFont(u8g2_font_5x8_tf);
-        u8.drawStr(SCREEN_W - 15, SCREEN_H - 1, "2/3");
 
     } else if (pagina == 3) {
         // ── PÁGINA 3: WiFi + firmware ──

@@ -44,7 +44,7 @@
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 // ----- Máquina de estados global ------------------------------
-enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY };
+enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO };
 static AppState appState = AppState::IDLE;
 
 static uint32_t menuHasta = 0;
@@ -70,6 +70,14 @@ static uint32_t ultimoBotonMs   = 0;  // timestamp del último BTN_A_PRESS
 static bool     btnPulsado       = false;  // botón está físicamente presionado
 static uint32_t btnPulsadoDesde  = 0;      // millis() cuando se detectó el press
 static bool     longPressEjecutado = false; // flag: ya se hizo el toggle, ignorar release
+
+// ----- Renacer: confirmación de doble toque en página 2 -------
+static bool     renacerConfirmando  = false; // esperando pie para confirmar
+static uint32_t renacerTimeoutHasta = 0;     // millis límite para confirmar
+
+// ----- Animación de nacimiento --------------------------------
+static uint32_t nacimientoInicioMs = 0;  // millis() cuando empezó la anim
+static uint8_t  nacimientoFase     = 0;  // fase actual (0, 1, 2)
 
 // ----- Expresiones aleatorias idle ----------------------------
 static uint32_t sigGuino       = 0;
@@ -118,7 +126,9 @@ static void marcarActividad(uint32_t ahora) {
 // ------------------------------------------------------------
 static void scanI2C() {
     Serial.println("[i2c] escaneando bus...");
-    for (uint8_t addr = 1; addr < 127; addr++) {
+    // Solo rango válido 0x08..0x77; las direcciones <0x08 y >0x77 son
+    // reservadas y generan falsos positivos (ej. el "fantasma" en 0x01).
+    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0)
             Serial.printf("[i2c] dispositivo en 0x%02X\n", addr);
@@ -162,10 +172,31 @@ static void despertar(uint32_t ahora) {
 }
 
 // ------------------------------------------------------------
+static void dispararNacimiento(uint32_t ahora) {
+    // Arranca la animación de encendido CRT (no bloqueante).
+    // Fase 0 (~260 ms): línea horizontal crece desde el centro.
+    // Fase 1 (~560 ms): apertura vertical hacia pantalla llena (flash).
+    // Fase 2 (~480 ms): ruido de estática/sintonía.
+    // Fase 3 (~820 ms): revelado de cara con barrido de scanline.
+    // Al terminar: IDLE con expresión FELIZ. Total ~2.1 s.
+    appState           = AppState::NACIENDO;
+    nacimientoInicioMs = ahora;
+    nacimientoFase     = 0;
+    // No mostramos DORMIDO; la pantalla arranca en negro (fase 0 lo dibuja).
+    // Preparamos la expresión FELIZ para la fase 3, pero no la enviamos aún.
+    face.setExpression(Expression::FELIZ);
+    // TV_ON cubre toda la animación: pop → calentamiento → estática → chillido CRT → chirp final.
+    sound.play(Melody::TV_ON);
+    randExprActiva     = false;
+    Serial.println("[app] animacion nacimiento CRT iniciada");
+}
+
+// ------------------------------------------------------------
 static void entrarStandby() {
     randExprActiva     = false;
     btnPulsado         = false;   // cancelar long-press pendiente
     longPressEjecutado = false;
+    renacerConfirmando = false;   // cancelar confirmación de renacer si estaba activa
     appState = AppState::STANDBY;
     u8g2.setPowerSave(1);
     Serial.println("[app] standby — pantalla apagada");
@@ -250,7 +281,13 @@ static void despacharEventos(uint32_t ahora) {
         if (appState == AppState::MENU) {
             if (ev == InputEvent::BTN_A_PRESS) {
                 ultimoBotonMs = ahora;
-                if (menuPagina == 1) {
+                if (renacerConfirmando) {
+                    // Botón cancela la confirmación de renacer
+                    renacerConfirmando = false;
+                    sound.play(Melody::BIP);
+                    menuHasta = ahora + MENU_TIMEOUT_MS;
+                    Serial.println("[app] renacer cancelado (boton)");
+                } else if (menuPagina == 1) {
                     // Pasar a página 2
                     menuPagina = 2;
                     menuHasta = ahora + MENU_TIMEOUT_MS;
@@ -268,6 +305,36 @@ static void despacharEventos(uint32_t ahora) {
                     btnPulsadoDesde    = ahora;
                     longPressEjecutado = false;
                     menuHasta          = ahora + MENU_TIMEOUT_MS; // renovar timeout
+                }
+            } else if (menuPagina == 2) {
+                // Acciones táctiles en página 2 (renacer, doble confirmación)
+                bool enLockout = (ultimoBotonMs != 0) &&
+                                 ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
+                if (enLockout) {
+                    Serial.println("[app] touch ignorado (lockout boton, menu p2)");
+                } else if (ev == InputEvent::TOUCH_START) {
+                    if (!renacerConfirmando) {
+                        // Primer toque (cabeza): pedir confirmación
+                        renacerConfirmando   = true;
+                        renacerTimeoutHasta  = ahora + MENU_RENACER_CONFIRM_MS;
+                        menuHasta            = ahora + MENU_TIMEOUT_MS;
+                        sound.play(Melody::BIP);
+                        Serial.println("[app] renacer: aguardando confirmacion (pie=si, btn=no)");
+                    }
+                } else if (ev == InputEvent::TICKLE_START) {
+                    if (renacerConfirmando) {
+                        // Segundo toque (pie): CONFIRMAR renacer
+                        renacerConfirmando = false;
+                        time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
+                        personality.renacer(nowEpoch);
+                        mood.reset();
+                        // Cerrar menú y arrancar animación de nacimiento
+                        menuPagina = 1;
+                        btnPulsado         = false;
+                        longPressEjecutado = false;
+                        dispararNacimiento(ahora);
+                        Serial.println("[app] renacer CONFIRMADO — animacion nacimiento");
+                    }
                 }
             } else if (menuPagina == 3) {
                 // Acciones táctiles solo en página 3
@@ -297,6 +364,11 @@ static void despacharEventos(uint32_t ahora) {
                     entroADormirMs = ahora;
                 }
             }
+            continue;
+        }
+
+        // NACIENDO: ignorar toda interacción durante la animación
+        if (appState == AppState::NACIENDO) {
             continue;
         }
 
@@ -363,7 +435,7 @@ static void despacharEventos(uint32_t ahora) {
                         } else {
                             mood.apply(MoodEffect::COSQUILLAS);
                             personality.event(PersEvent::COSQUILLAS_OK);
-                            sound.play(Melody::FELIZ);
+                            sound.play(Melody::RISA);  // carcajada ja-ja-ja
                             reaccionar(Expression::RISA, REACCION_TICKLE_MS, "", ahora);
                         }
                     }
@@ -532,7 +604,15 @@ void loop() {
         time_t nowEpoch = time(nullptr);
         mood.applyOfflineDecay(nowEpoch);
         mood.noteTimeValid(nowEpoch);
+        // Si el juguete aún no tenía fecha de nacimiento, esta es la primera
+        // vez que se conoce la hora → registrar nacimiento y animar.
+        bool eraSinNacimiento = (personality.edadDias() < 0);
         personality.noteTimeValid(nowEpoch);
+        if (eraSinNacimiento && personality.edadDias() >= 0 &&
+            appState == AppState::IDLE) {
+            // Primera hora válida: disparar animación de nacimiento
+            dispararNacimiento(ahora);
+        }
     }
 
     // Muestreo pasivo de personalidad: cada tick de humor, solo en IDLE
@@ -674,16 +754,24 @@ void loop() {
         (ahora - entroADormirMs) >= DORMIDO_STANDBY_MS) {
         entrarStandby();
     }
+    // NACIENDO no puede entrar en standby: ya retorna antes en el bloque de arriba
 
     // En standby: no hay más lógica ni render
     if (appState == AppState::STANDBY) {
         return;
     }
 
+    // Timeout de confirmación del renacer (sin pie en 6 s → cancelar)
+    if (renacerConfirmando && (int32_t)(ahora - renacerTimeoutHasta) >= 0) {
+        renacerConfirmando = false;
+        Serial.println("[app] renacer cancelado (timeout)");
+    }
+
     // Auto-cierre del menú
     if (appState == AppState::MENU && (int32_t)(ahora - menuHasta) >= 0) {
         appState = AppState::IDLE;
         menuPagina = 1;  // resetear paginación (Etapa C)
+        renacerConfirmando = false;  // cancelar confirmación pendiente
         idleExprActual = mood.dominantExpression();
         face.setExpression(idleExprActual);
         marcarActividad(ahora);
@@ -698,6 +786,113 @@ void loop() {
     bool fueraDeLaGracia = (int32_t)(ahora - standbyGraciaHasta) >= 0;
     if (appState == AppState::IDLE && esNoche && fueraDeLaGracia) entrarADormir(ahora);
     else if (appState == AppState::SLEEPING && !esNoche)           despertar(ahora);
+
+    // ── Animación de nacimiento CRT (AppState::NACIENDO) ─────────
+    // Secuencia temporizada no bloqueante de 4 fases (ver config.h):
+    //   Fase 0 [0, F0):              línea horizontal crece (punto→ancho total)
+    //   Fase 1 [F0, F0+F1):          apertura vertical (línea→pantalla llena/flash)
+    //   Fase 2 [F0+F1, F0+F1+F2):   estática CRT (ruido aleatorio)
+    //   Fase 3 [F0+F1+F2, total):    revelado de cara con barrido descendente
+    //   Al terminar → IDLE con FELIZ
+    if (appState == AppState::NACIENDO) {
+        uint32_t t = ahora - nacimientoInicioMs;
+
+        // ── Transiciones de fase ──────────────────────────────────
+        uint32_t t1 = ANIM_NACIMIENTO_F0_MS;
+        uint32_t t2 = t1 + ANIM_NACIMIENTO_F1_MS;
+        uint32_t t3 = t2 + ANIM_NACIMIENTO_F2_MS;
+
+        if (nacimientoFase == 0 && t >= t1) {
+            nacimientoFase = 1;
+        } else if (nacimientoFase == 1 && t >= t2) {
+            nacimientoFase = 2;
+        } else if (nacimientoFase == 2 && t >= t3) {
+            nacimientoFase = 3;
+            // Sin bip extra: el chirp final de TV_ON ya cubre esta transición.
+        } else if (nacimientoFase == 3 && t >= ANIM_NACIMIENTO_TOTAL_MS) {
+            // Fin de animación → IDLE feliz
+            appState       = AppState::IDLE;
+            idleExprActual = Expression::FELIZ;
+            face.setExpression(idleExprActual);
+            marcarActividad(ahora);
+            entroADormirMs = ahora;
+            scheduleGuino(ahora);
+            scheduleSospechoso(ahora);
+            Serial.println("[app] animacion nacimiento CRT completa → IDLE FELIZ");
+            // Caer en el render normal del frame actual (con cara FELIZ)
+        }
+
+        if (appState == AppState::NACIENDO) {
+            // ── Render custom CRT — NO delegar en face.render() durante fases 0‑2 ──
+            u8g2.clearBuffer();  // pantalla negra base
+
+            if (nacimientoFase == 0) {
+                // ── Fase 0: línea horizontal crece desde el centro ────────
+                // Progreso 0.0→1.0 en la duración de la fase
+                float p = (float)t / (float)ANIM_NACIMIENTO_F0_MS;
+                if (p > 1.0f) p = 1.0f;
+                // Ancho de la línea: de 2 px hasta 128 px
+                int16_t lineaW = (int16_t)(2.0f + p * (128.0f - 2.0f));
+                int16_t lineaX = (128 - lineaW) / 2;  // centrada horizontalmente
+                int16_t lineaY = 32 - (ANIM_NACIMIENTO_LINEA_GROSOR / 2);  // centro vertical
+                u8g2.setDrawColor(1);
+                u8g2.drawBox(lineaX, lineaY, lineaW, ANIM_NACIMIENTO_LINEA_GROSOR);
+
+            } else if (nacimientoFase == 1) {
+                // ── Fase 1: apertura vertical de línea a pantalla llena ───
+                // Progreso 0.0→1.0 en la duración de la fase 1
+                float p = (float)(t - t1) / (float)ANIM_NACIMIENTO_F1_MS;
+                if (p > 1.0f) p = 1.0f;
+                // Altura crece de LINEA_GROSOR px hasta 64 px
+                int16_t altBase = ANIM_NACIMIENTO_LINEA_GROSOR;
+                int16_t altMax  = 64;
+                int16_t alt = (int16_t)(altBase + p * (altMax - altBase));
+                int16_t rectY = 32 - alt / 2;
+                if (rectY < 0) rectY = 0;
+                u8g2.setDrawColor(1);
+                u8g2.drawBox(0, rectY, 128, alt);
+
+            } else if (nacimientoFase == 2) {
+                // ── Fase 2: estática/ruido CRT ───────────────────────────
+                // Fondo negro (ya está limpio); dibujar píxeles aleatorios
+                u8g2.setDrawColor(1);
+                for (uint16_t i = 0; i < ANIM_NACIMIENTO_RUIDO_PX; i++) {
+                    int16_t rx = (int16_t)(random(128));
+                    int16_t ry = (int16_t)(random(64));
+                    u8g2.drawPixel(rx, ry);
+                }
+                // Algunas scanlines horizontales tenues (filas completas esparcidas)
+                for (uint8_t fila = 4; fila < 64; fila += 8) {
+                    if (random(3) == 0) {  // 1 de cada 3 → aspecto irregular
+                        u8g2.drawHLine(0, fila, 128);
+                    }
+                }
+
+            } else {
+                // ── Fase 3: revelado de cara con barrido descendente ──────
+                // face ya tiene setExpression(FELIZ) desde dispararNacimiento.
+                // Actualizamos la animación interna de la cara.
+                face.update(ahora);
+                // Renderizar la cara completa en el buffer
+                face.render(u8g2);
+                // Tapar la parte inferior que aún no se reveló con un rectángulo negro.
+                // Progreso 0.0 (todo tapado) → 1.0 (cara completa).
+                float p = (float)(t - t3) / (float)ANIM_NACIMIENTO_F3_MS;
+                if (p > 1.0f) p = 1.0f;
+                // La "cortina" negra baja: su borde superior empieza en y=0 y baja a y=64.
+                int16_t reveladoY = (int16_t)(p * 64.0f);  // línea de revelado (0→64)
+                if (reveladoY < 64) {
+                    // Tapar las filas que aún no se revelan (debajo de la línea de barrido)
+                    u8g2.setDrawColor(0);
+                    u8g2.drawBox(0, reveladoY, 128, 64 - reveladoY);
+                }
+                u8g2.setDrawColor(1);  // restaurar color de dibujo
+            }
+
+            u8g2.sendBuffer();
+            return;
+        }
+    }
 
     // Fin de reacción
     if (appState == AppState::REACTING) {
@@ -802,6 +997,8 @@ void loop() {
         md.energetico  = personality.energetico();
         md.perezoso    = personality.perezoso();
         md.edadDias    = personality.edadDias();
+        // Sub-estado de confirmación de renacer (página 2)
+        md.renacerConfirmando = renacerConfirmando;
         menuRender(u8g2, md, menuPagina);
     } else {
         face.render(u8g2);

@@ -46,6 +46,9 @@ public:
     // Seteo directo para comandos seriales de test (también persiste en NVS)
     void set(uint8_t h, uint8_t e, uint8_t b);
 
+    // Reset completo al nacer: vuelve a los defaults y persiste en NVS
+    void reset();
+
 private:
     // Variables de estado (0-100)
     uint8_t _happiness;

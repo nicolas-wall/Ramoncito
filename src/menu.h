@@ -28,6 +28,9 @@ struct MenuData {
     uint8_t energetico;     // 0-100
     uint8_t perezoso;       // 0-100
     int     edadDias;       // -1 si sin hora válida; < PERSONALIDAD_DIAS_FORMACION si en formación
+
+    // Sub-estado de confirmación de renacer (página 2)
+    bool    renacerConfirmando;  // true = esperando confirmación del pie
 };
 
 // Dibuja la pantalla de estado completa (no llama clearBuffer/sendBuffer)

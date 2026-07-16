@@ -78,6 +78,36 @@ static const Sound::Nota melodia_bip[] = {
     { 900, 25 },
 };
 
+// RISA: carcajada "ja-ja-ja" — notas cortas staccato con silencios entre ellas.
+// Dos tonos alternados (700/600 Hz) dan la cadencia entrecortada de una risa.
+static const Sound::Nota melodia_risa[] = {
+    { 700, 70 }, {   0, 60 },
+    { 600, 70 }, {   0, 60 },
+    { 700, 70 }, {   0, 60 },
+    { 600, 70 }, {   0, 60 },
+    { 680, 70 }, {   0, 60 },
+    { 560, 90 },
+};
+
+// TV_ON: "TV vieja encendiendo" — acompaña la animación de nacimiento CRT (~1.7 s)
+// pop del encendido → barrido de calentamiento del tubo → crackle de estática
+// → chillido agudo CRT sostenido → chirp final al aparecer la imagen
+static const Sound::Nota melodia_tv_on[] = {
+    {  150,  60 }, {    0,  20 },           // thunk/pop del encendido
+    {  200,  45 }, {  300,  45 },           // barrido: el tubo calienta
+    {  450,  45 }, {  650,  45 },
+    {  900,  50 },
+    {    0,  40 },
+    { 3000,  30 }, {    0,  18 },           // crackle de estática
+    { 4200,  30 }, {    0,  18 },
+    { 2600,  30 }, {    0,  18 },
+    { 3600,  30 },
+    {    0,  30 },
+    { 5200, 420 },                           // chillido agudo CRT sostenido
+    {    0,  40 },
+    { 1300,  70 }, { 1700, 110 },            // chirp corto al aparecer la imagen
+};
+
 // =============================================================
 //  Tabla de despacho: Melody → puntero + cantidad de notas
 // =============================================================
@@ -99,6 +129,8 @@ static const MelodiaDesc tabla[] = {
     { melodia_despertar, sizeof(melodia_despertar) / sizeof(Sound::Nota) },
     { melodia_ronquido,  sizeof(melodia_ronquido)  / sizeof(Sound::Nota) },
     { melodia_bip,       sizeof(melodia_bip)       / sizeof(Sound::Nota) },
+    { melodia_tv_on,     sizeof(melodia_tv_on)     / sizeof(Sound::Nota) },
+    { melodia_risa,      sizeof(melodia_risa)      / sizeof(Sound::Nota) },
 };
 
 // =============================================================
