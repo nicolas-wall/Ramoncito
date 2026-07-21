@@ -1,11 +1,13 @@
 // =============================================================
 //  personality.cpp — Módulo de personalidad de espToy
-//  4 rasgos independientes 0-100 (alegre, grunon, energetico,
-//  perezoso). Aprendizaje por muestreo pasivo y eventos.
+//  2 ejes bipolares 0-100: ÁNIMO (gruñón↔alegre) y
+//  ENERGÍA (perezoso↔energético). Los 4 rasgos clásicos se
+//  derivan de estos ejes (ver personality.h).
+//  Aprendizaje por muestreo pasivo y eventos.
 //  Plasticidad §3.3: acumuladores float para que el factor ×0.25
 //  no se pierda por redondeo — cada ajuste suma delta×factor al
 //  acumulador; cuando |acumulador| >= 1 se transfiere la parte
-//  entera al rasgo (saturado 0-100).
+//  entera al eje (saturado 0-100).
 // =============================================================
 
 #include "personality.h"
@@ -17,12 +19,13 @@
 Personality personality;
 
 // ── Namespace y claves NVS ────────────────────────────────────
-static const char* PERS_NS     = "esptoy";
-static const char* PERS_ALEGRE = "pAlegre";
-static const char* PERS_GRUNON = "pGrunon";
-static const char* PERS_ENERG  = "pEnerg";
-static const char* PERS_PEREZ  = "pPerez";
-static const char* PERS_BIRTH  = "pBirth";
+static const char* PERS_NS      = "esptoy";
+static const char* PERS_ANIMO   = "pAnimo";
+static const char* PERS_ENERGIA = "pEnergia";
+static const char* PERS_BIRTH   = "pBirth";
+// Claves viejas (4 rasgos) — solo para migración al modelo de 2 ejes
+static const char* PERS_OLD_ALEGRE = "pAlegre";
+static const char* PERS_OLD_ENERG  = "pEnerg";
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers: aritmética saturada en [0, 100]
@@ -40,14 +43,14 @@ uint8_t Personality::_subSat(uint8_t v, uint8_t delta) {
 // ─────────────────────────────────────────────────────────────
 //  _applyDelta(): aplica un delta con plasticidad via acumulador.
 //  El acumulador recibe delta×factor; cuando |acc| >= 1 se
-//  transfiere la parte entera al rasgo saturado.
+//  transfiere la parte entera al eje saturado.
 // ─────────────────────────────────────────────────────────────
 
 void Personality::_applyDelta(uint8_t& rasgo, float& acc, int8_t delta) {
     float factor = plasticidadFactor();
     acc += (float)delta * factor;
 
-    // Transferir parte entera al rasgo
+    // Transferir parte entera al eje
     if (acc >= 1.0f) {
         int8_t entero = (int8_t)acc;
         rasgo = _addSat(rasgo, (uint8_t)entero);
@@ -69,28 +72,30 @@ void Personality::_loadFromNVS() {
     Preferences prefs;
     if (!prefs.begin(PERS_NS, /*readOnly=*/true)) {
         // Namespace aún no existe: defaults
-        _alegre     = PERSONALIDAD_INI;
-        _grunon     = PERSONALIDAD_INI;
-        _energetico = PERSONALIDAD_INI;
-        _perezoso   = PERSONALIDAD_INI;
+        _animo      = PERSONALIDAD_INI;
+        _energia    = PERSONALIDAD_INI;
         _birthEpoch = 0;
         Serial.println("[pers] NVS vacío, usando defaults");
         return;
     }
 
-    if (prefs.isKey(PERS_ALEGRE)) {
-        _alegre     = prefs.getUChar(PERS_ALEGRE, PERSONALIDAD_INI);
-        _grunon     = prefs.getUChar(PERS_GRUNON, PERSONALIDAD_INI);
-        _energetico = prefs.getUChar(PERS_ENERG,  PERSONALIDAD_INI);
-        _perezoso   = prefs.getUChar(PERS_PEREZ,  PERSONALIDAD_INI);
+    if (prefs.isKey(PERS_ANIMO)) {
+        // Modelo nuevo (2 ejes)
+        _animo      = prefs.getUChar(PERS_ANIMO,   PERSONALIDAD_INI);
+        _energia    = prefs.getUChar(PERS_ENERGIA, PERSONALIDAD_INI);
         _birthEpoch = (time_t)prefs.getLong64(PERS_BIRTH, 0);
-        Serial.printf("[pers] cargado NVS -> A:%u G:%u E:%u P:%u birth:%lld\n",
-                      _alegre, _grunon, _energetico, _perezoso, (long long)_birthEpoch);
+        Serial.printf("[pers] cargado NVS -> animo:%u energia:%u birth:%lld\n",
+                      _animo, _energia, (long long)_birthEpoch);
+    } else if (prefs.isKey(PERS_OLD_ALEGRE)) {
+        // Migración desde el modelo viejo (4 rasgos): animo=alegre, energia=energetico
+        _animo      = prefs.getUChar(PERS_OLD_ALEGRE, PERSONALIDAD_INI);
+        _energia    = prefs.getUChar(PERS_OLD_ENERG,  PERSONALIDAD_INI);
+        _birthEpoch = (time_t)prefs.getLong64(PERS_BIRTH, 0);
+        Serial.printf("[pers] migrado 4->2 ejes -> animo:%u energia:%u birth:%lld\n",
+                      _animo, _energia, (long long)_birthEpoch);
     } else {
-        _alegre     = PERSONALIDAD_INI;
-        _grunon     = PERSONALIDAD_INI;
-        _energetico = PERSONALIDAD_INI;
-        _perezoso   = PERSONALIDAD_INI;
+        _animo      = PERSONALIDAD_INI;
+        _energia    = PERSONALIDAD_INI;
         _birthEpoch = 0;
         Serial.println("[pers] sin datos NVS, usando defaults");
     }
@@ -103,10 +108,8 @@ void Personality::_saveToNVS() {
         Serial.println("[pers] ERROR: no se pudo abrir NVS para escritura");
         return;
     }
-    prefs.putUChar(PERS_ALEGRE, _alegre);
-    prefs.putUChar(PERS_GRUNON, _grunon);
-    prefs.putUChar(PERS_ENERG,  _energetico);
-    prefs.putUChar(PERS_PEREZ,  _perezoso);
+    prefs.putUChar(PERS_ANIMO,   _animo);
+    prefs.putUChar(PERS_ENERGIA, _energia);
     if (_birthEpoch != 0) {
         prefs.putLong64(PERS_BIRTH, (int64_t)_birthEpoch);
     }
@@ -124,10 +127,8 @@ void Personality::begin() {
     _lastSaveMs = millis();
 
     // Acumuladores float para plasticidad fraccionaria
-    _accAlegre = 0.0f;
-    _accGrunon = 0.0f;
-    _accEnerg  = 0.0f;
-    _accPerez  = 0.0f;
+    _accAnimo   = 0.0f;
+    _accEnergia = 0.0f;
 
     _loadFromNVS();
 }
@@ -143,24 +144,20 @@ void Personality::begin() {
 void Personality::sampleTick(Expression dominante, bool descansando) {
     // El caso DORMIDO solo aplica si descansando==true (siesta diurna)
     if (descansando && dominante == Expression::DORMIDO) {
-        _applyDelta(_perezoso,   _accPerez,  +2);
-        _applyDelta(_energetico, _accEnerg,  -1);
+        _applyDelta(_energia, _accEnergia, -2);   // dormir de día → más perezoso
     } else {
         switch (dominante) {
             case Expression::FELIZ:
-                _applyDelta(_alegre, _accAlegre, +1);
-                _applyDelta(_grunon, _accGrunon, -1);
+                _applyDelta(_animo, _accAnimo, +1);   // hacia alegre
                 break;
             case Expression::ENOJADO:
-                _applyDelta(_grunon, _accGrunon, +2);
-                _applyDelta(_alegre, _accAlegre, -1);
+                _applyDelta(_animo, _accAnimo, -2);   // hacia gruñón
                 break;
             case Expression::TRISTE:
-                _applyDelta(_grunon, _accGrunon, +1);
-                _applyDelta(_alegre, _accAlegre, -1);
+                _applyDelta(_animo, _accAnimo, -1);   // hacia gruñón
                 break;
             case Expression::ABURRIDO:
-                _applyDelta(_perezoso, _accPerez, +1);
+                _applyDelta(_energia, _accEnergia, -1); // hacia perezoso
                 break;
             case Expression::NEUTRAL:
             default:
@@ -170,21 +167,18 @@ void Personality::sampleTick(Expression dominante, bool descansando) {
     }
 
     if (_dirty) {
-        Serial.printf("[pers] sample %d -> A:%u G:%u E:%u P:%u f:%.2f\n",
-                      (int)dominante,
-                      _alegre, _grunon, _energetico, _perezoso,
-                      plasticidadFactor());
+        Serial.printf("[pers] sample %d -> animo:%u energia:%u f:%.2f\n",
+                      (int)dominante, _animo, _energia, plasticidadFactor());
     }
 }
 
 // ─────────────────────────────────────────────────────────────
 //  event(): evento discreto de interacción (doc §3.2 "Eventos")
-//  Los deltas ya incluyen el +1 de "cualquier interacción →
-//  energetico+1" donde aplica:
-//    CARICIA           alegre+1, energetico+1
-//    COSQUILLAS_OK     alegre+1, energetico+2 (= +1 interacción + +1 cosquilla)
-//    ENOJO_COSQUILLAS  grunon+2, energetico+1
-//    ENOJO_NOCTURNO    grunon+2 (el nocturno no cuenta como interacción energetica)
+//    CARICIA           animo+1, energia+1
+//    COSQUILLAS_OK     animo+1, energia+2
+//    ENOJO_COSQUILLAS  animo-2, energia+1
+//    ENOJO_NOCTURNO    animo-2
+//    LEVANTADO         animo+1, energia+1
 // ─────────────────────────────────────────────────────────────
 
 void Personality::event(PersEvent e) {
@@ -192,32 +186,37 @@ void Personality::event(PersEvent e) {
 
     switch (e) {
         case PersEvent::CARICIA:
-            _applyDelta(_alegre,     _accAlegre, +1);
-            _applyDelta(_energetico, _accEnerg,  +1);
+            _applyDelta(_animo,   _accAnimo,   +1);
+            _applyDelta(_energia, _accEnergia, +1);
             nombre = "CARICIA";
             break;
 
         case PersEvent::COSQUILLAS_OK:
-            _applyDelta(_alegre,     _accAlegre, +1);
-            _applyDelta(_energetico, _accEnerg,  +2);
+            _applyDelta(_animo,   _accAnimo,   +1);
+            _applyDelta(_energia, _accEnergia, +2);
             nombre = "COSQUILLAS_OK";
             break;
 
         case PersEvent::ENOJO_COSQUILLAS:
-            _applyDelta(_grunon,     _accGrunon, +2);
-            _applyDelta(_energetico, _accEnerg,  +1);
+            _applyDelta(_animo,   _accAnimo,   -2);
+            _applyDelta(_energia, _accEnergia, +1);
             nombre = "ENOJO_COSQUILLAS";
             break;
 
         case PersEvent::ENOJO_NOCTURNO:
-            _applyDelta(_grunon, _accGrunon, +2);
+            _applyDelta(_animo, _accAnimo, -2);
             nombre = "ENOJO_NOCTURNO";
+            break;
+
+        case PersEvent::LEVANTADO:
+            _applyDelta(_animo,   _accAnimo,   +1);
+            _applyDelta(_energia, _accEnergia, +1);
+            nombre = "LEVANTADO";
             break;
     }
 
-    Serial.printf("[pers] evento %s -> A:%u G:%u E:%u P:%u f:%.2f\n",
-                  nombre, _alegre, _grunon, _energetico, _perezoso,
-                  plasticidadFactor());
+    Serial.printf("[pers] evento %s -> animo:%u energia:%u f:%.2f\n",
+                  nombre, _animo, _energia, plasticidadFactor());
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -245,20 +244,17 @@ void Personality::noteTimeValid(time_t nowEpoch) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  set(): seteo directo para pruebas seriales
+//  set(): seteo directo de los dos ejes para pruebas seriales
 // ─────────────────────────────────────────────────────────────
 
-void Personality::set(uint8_t alegre, uint8_t grunon, uint8_t energetico, uint8_t perezoso) {
-    _alegre     = (alegre     > 100u) ? 100u : alegre;
-    _grunon     = (grunon     > 100u) ? 100u : grunon;
-    _energetico = (energetico > 100u) ? 100u : energetico;
-    _perezoso   = (perezoso   > 100u) ? 100u : perezoso;
+void Personality::set(uint8_t animo, uint8_t energia) {
+    _animo   = (animo   > 100u) ? 100u : animo;
+    _energia = (energia > 100u) ? 100u : energia;
 
     // Resetear acumuladores para que los nuevos valores sean el punto de partida
-    _accAlegre = _accGrunon = _accEnerg = _accPerez = 0.0f;
+    _accAnimo = _accEnergia = 0.0f;
 
-    Serial.printf("[pers] set() -> A:%u G:%u E:%u P:%u\n",
-                  _alegre, _grunon, _energetico, _perezoso);
+    Serial.printf("[pers] set() -> animo:%u energia:%u\n", _animo, _energia);
     _saveToNVS();
 }
 
@@ -267,30 +263,24 @@ void Personality::set(uint8_t alegre, uint8_t grunon, uint8_t energetico, uint8_
 // ─────────────────────────────────────────────────────────────
 
 void Personality::renacer(time_t nowEpoch) {
-    _alegre     = PERSONALIDAD_INI;
-    _grunon     = PERSONALIDAD_INI;
-    _energetico = PERSONALIDAD_INI;
-    _perezoso   = PERSONALIDAD_INI;
+    _animo   = PERSONALIDAD_INI;
+    _energia = PERSONALIDAD_INI;
 
     // Resetear acumuladores float para que no queden sesgos
-    _accAlegre = 0.0f;
-    _accGrunon = 0.0f;
-    _accEnerg  = 0.0f;
-    _accPerez  = 0.0f;
+    _accAnimo   = 0.0f;
+    _accEnergia = 0.0f;
 
     // nowEpoch=0 → sin hora válida todavía; quedará "s/edad" hasta NTP
     _birthEpoch = nowEpoch;
 
-    Serial.printf("[pers] renacer -> A:%u G:%u E:%u P:%u birth:%lld\n",
-                  _alegre, _grunon, _energetico, _perezoso, (long long)_birthEpoch);
+    Serial.printf("[pers] renacer -> animo:%u energia:%u birth:%lld\n",
+                  _animo, _energia, (long long)_birthEpoch);
 
     // Persistir inmediatamente (fuerza guardado de pBirth aunque sea 0)
     Preferences prefs;
     if (prefs.begin(PERS_NS, /*readOnly=*/false)) {
-        prefs.putUChar(PERS_ALEGRE, _alegre);
-        prefs.putUChar(PERS_GRUNON, _grunon);
-        prefs.putUChar(PERS_ENERG,  _energetico);
-        prefs.putUChar(PERS_PEREZ,  _perezoso);
+        prefs.putUChar(PERS_ANIMO,   _animo);
+        prefs.putUChar(PERS_ENERGIA, _energia);
         prefs.putLong64(PERS_BIRTH, (int64_t)_birthEpoch);
         prefs.end();
     }
@@ -325,6 +315,7 @@ float Personality::plasticidadFactor() const {
 
 // ─────────────────────────────────────────────────────────────
 //  Helpers de modulación (doc §3.4)
+//  Consultan los rasgos clásicos vía los accessores derivados.
 // ─────────────────────────────────────────────────────────────
 
 bool Personality::esAlta(uint8_t rasgo) {
@@ -332,12 +323,12 @@ bool Personality::esAlta(uint8_t rasgo) {
 }
 
 uint8_t Personality::tickleMax() const {
-    return esAlta(_grunon) ? TICKLE_SEGUIDAS_GRUNON : TICKLE_SEGUIDAS_MAX;
+    return esAlta(grunon()) ? TICKLE_SEGUIDAS_GRUNON : TICKLE_SEGUIDAS_MAX;
 }
 
 uint32_t Personality::malhumorMs() const {
-    bool gAlto = esAlta(_grunon);
-    bool aAlto = esAlta(_alegre);
+    bool gAlto = esAlta(grunon());
+    bool aAlto = esAlta(alegre());
     if (gAlto && aAlto)  return MALHUMOR_MS;           // se cancelan → base
     if (gAlto)           return MALHUMOR_MS * 2UL;
     if (aAlto)           return MALHUMOR_MS / 2UL;
@@ -345,12 +336,12 @@ uint32_t Personality::malhumorMs() const {
 }
 
 uint8_t Personality::decayFelicidad() const {
-    return esAlta(_alegre) ? PERSONALIDAD_DECAY_FELIZ_ALEGRE : MOOD_DECAY_FELICIDAD_PM;
+    return esAlta(alegre()) ? PERSONALIDAD_DECAY_FELIZ_ALEGRE : MOOD_DECAY_FELICIDAD_PM;
 }
 
 uint8_t Personality::decayEnergia() const {
-    bool eAlto = esAlta(_energetico);
-    bool pAlto = esAlta(_perezoso);
+    bool eAlto = esAlta(energetico());
+    bool pAlto = esAlta(perezoso());
     if (pAlto && eAlto)  return MOOD_DECAY_ENERGIA_PM;       // se cancelan → base
     if (pAlto)           return MOOD_DECAY_ENERGIA_PM * 2u;
     // Si energetico alto (y perezoso no alto): base normal —
@@ -360,12 +351,12 @@ uint8_t Personality::decayEnergia() const {
 
 bool Personality::energiaDecaeMitad() const {
     // True cuando la energía debe decaer solo 1 tick sí / 1 tick no
-    return esAlta(_energetico) && !esAlta(_perezoso);
+    return esAlta(energetico()) && !esAlta(perezoso());
 }
 
 uint8_t Personality::recuperaEnergia() const {
-    bool eAlto = esAlta(_energetico);
-    bool pAlto = esAlta(_perezoso);
+    bool eAlto = esAlta(energetico());
+    bool pAlto = esAlta(perezoso());
     int16_t base = (int16_t)MOOD_RECUPERA_ENERGIA_PT;
     if (eAlto) base += (int16_t)PERSONALIDAD_RECUPERA_DELTA;
     if (pAlto) base -= (int16_t)PERSONALIDAD_RECUPERA_DELTA;
@@ -375,6 +366,6 @@ uint8_t Personality::recuperaEnergia() const {
 }
 
 uint8_t Personality::umbralSiesta() const {
-    return esAlta(_perezoso) ? PERSONALIDAD_UMBRAL_SIESTA_PEREZOSO
-                             : PERSONALIDAD_UMBRAL_SIESTA_BASE;
+    return esAlta(perezoso()) ? PERSONALIDAD_UMBRAL_SIESTA_PEREZOSO
+                              : PERSONALIDAD_UMBRAL_SIESTA_BASE;
 }

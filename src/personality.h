@@ -5,26 +5,31 @@
 
 // =============================================================
 //  personality.h — Módulo de personalidad de espToy
-//  4 rasgos independientes 0-100 (alegre, grunon, energetico,
-//  perezoso). Aprenden por muestreo pasivo del estado de humor
-//  y por eventos de interacción (doc 06 §3).
+//  2 ejes bipolares 0-100:
+//    ÁNIMO   (0 = gruñón   .. 100 = alegre)
+//    ENERGÍA (0 = perezoso .. 100 = energético)
+//  Los antiguos 4 rasgos se derivan de estos dos ejes
+//  (alegre=animo, grunon=100-animo, energetico=energia,
+//   perezoso=100-energia) para no tocar la modulación §3.4.
+//  Aprenden por muestreo pasivo del estado de humor y por
+//  eventos de interacción (doc 06 §3).
 //
 //  Plasticidad §3.3: los primeros PERSONALIDAD_DIAS_FORMACION días
 //  los deltas se aplican ×1.0; luego ×PERSONALIDAD_FACTOR_MADURO.
-//  El factor se aplica mediante acumuladores float por rasgo para
+//  El factor se aplica mediante acumuladores float por eje para
 //  que la fracción no se pierda por redondeo.
 //
-//  Persistencia: NVS namespace "esptoy", claves "pAlegre",
-//  "pGrunon", "pEnerg", "pPerez", "pBirth".
+//  Persistencia: NVS namespace "esptoy", claves "pAnimo",
+//  "pEnergia", "pBirth" (migra desde las viejas pAlegre/pEnerg).
 // =============================================================
 
 // Eventos discretos que modifican la personalidad
 enum class PersEvent : uint8_t {
-    CARICIA,             // caricia de día → alegre+1, energetico+1
-    COSQUILLAS_OK,       // cosquillas bien recibidas → alegre+1, energetico+2
-                         //   (incluye el +1 de "cualquier interacción → energetico+1")
-    ENOJO_COSQUILLAS,    // demasiadas cosquillas → grunon+2, energetico+1
-    ENOJO_NOCTURNO       // despertado de noche → grunon+2
+    CARICIA,             // caricia de día → animo+1, energia+1
+    COSQUILLAS_OK,       // cosquillas bien recibidas → animo+1, energia+2
+    ENOJO_COSQUILLAS,    // demasiadas cosquillas → animo-2, energia+1
+    ENOJO_NOCTURNO,      // despertado de noche → animo-2
+    LEVANTADO            // lo alzan → animo+1, energia+1
 };
 
 class Personality {
@@ -47,18 +52,23 @@ public:
     // Si aún no se conoce la hora de nacimiento, fijarla a nowEpoch y guardar
     void noteTimeValid(time_t nowEpoch);
 
-    // Seteo directo de todos los rasgos para pruebas seriales; persiste en NVS
-    void set(uint8_t alegre, uint8_t grunon, uint8_t energetico, uint8_t perezoso);
+    // Seteo directo de los dos ejes para pruebas seriales; persiste en NVS
+    void set(uint8_t animo, uint8_t energia);
 
     // Renacer completo: rasgos al default neutro, acumuladores a 0,
     // birthEpoch = nowEpoch (0 si aún no hay hora válida). Persiste en NVS.
     void renacer(time_t nowEpoch);
 
-    // Accessores de solo lectura
-    uint8_t alegre()      const { return _alegre;     }
-    uint8_t grunon()      const { return _grunon;     }
-    uint8_t energetico()  const { return _energetico; }
-    uint8_t perezoso()    const { return _perezoso;   }
+    // Accessores de los dos ejes (0-100)
+    uint8_t animo()       const { return _animo;   }   // 0=gruñón   .. 100=alegre
+    uint8_t energia()     const { return _energia; }   // 0=perezoso .. 100=energético
+
+    // Accessores derivados (compatibilidad con la modulación §3.4 de
+    // mood.cpp / main.cpp, que consultan los 4 rasgos clásicos).
+    uint8_t alegre()      const { return _animo;                  }
+    uint8_t grunon()      const { return (uint8_t)(100 - _animo);   }
+    uint8_t energetico()  const { return _energia;                }
+    uint8_t perezoso()    const { return (uint8_t)(100 - _energia); }
 
     // Edad en días completos desde el nacimiento; -1 si no hay hora válida.
     int edadDias() const;
@@ -100,20 +110,16 @@ public:
     float plasticidadFactor() const;
 
 private:
-    // Rasgos: 0-100
-    uint8_t _alegre;
-    uint8_t _grunon;
-    uint8_t _energetico;
-    uint8_t _perezoso;
+    // Ejes bipolares: 0-100
+    uint8_t _animo;     // 0=gruñón   .. 100=alegre
+    uint8_t _energia;   // 0=perezoso .. 100=energético
 
     // Epoch del primer momento con hora válida (nacimiento); 0 = desconocido
     time_t  _birthEpoch;
 
     // Acumuladores float para plasticidad fraccionaria (§3.3)
-    float _accAlegre;
-    float _accGrunon;
-    float _accEnerg;
-    float _accPerez;
+    float _accAnimo;
+    float _accEnergia;
 
     // Guardado diferido
     bool     _dirty;

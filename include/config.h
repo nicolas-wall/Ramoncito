@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.6"
+#define FW_VERSION "0.9.7"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
@@ -50,6 +50,12 @@ static const uint8_t  TICKLE_SEGUIDAS_MAX = 3;
 static const uint32_t TICKLE_VENTANA_MS   = 6000;
 // Cooldown de malhumor tras enojarse por cosquillas de más (§1.2)
 static const uint32_t MALHUMOR_MS         = 60000;  // 60 s base (×2 gruñón, ÷2 alegre — Etapa B)
+
+// ----- Ronquido al dormir -------------------------------------
+// El ronquido suena periódicamente solo durante los primeros
+// RONQUIDO_VENTANA_MS tras quedarse dormido; después, silencio
+// (no se repite para siempre).
+static const uint32_t RONQUIDO_VENTANA_MS = 10000;  // 10 s de ronquidos al inicio del sueño
 
 // ----- Expresiones aleatorias durante idle --------------------
 static const uint32_t GUINO_RAND_MIN_MS    = 15000;   //  15 s entre guiños

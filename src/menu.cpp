@@ -98,6 +98,24 @@ static void truncarSSID(char *dst, const char *src, int maxChars) {
 // Función principal de render
 // ──────────────────────────────────────────────────
 void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
+    // ── OVERLAY: confirmación de renacer (pantalla completa, cualquier página) ──
+    if (d.renacerConfirmando) {
+        u8.setFont(u8g2_font_9x15B_tf);
+        int rw = (int)u8.getStrWidth("RENACER?");
+        u8.drawStr((SCREEN_W - rw) / 2, 28, "RENACER?");
+
+        u8.setFont(u8g2_font_5x8_tf);
+        const char* linea2 = "borra todo";
+        int l2w = (int)u8.getStrWidth(linea2);
+        u8.drawStr((SCREEN_W - l2w) / 2, 42, linea2);
+
+        u8.setFont(u8g2_font_4x6_tf);
+        const char* linea3 = "pie=confirmar btn=cancelar";
+        int l3w = (int)u8.getStrWidth(linea3);
+        u8.drawStr((SCREEN_W - l3w) / 2, 56, linea3);
+        return;
+    }
+
     if (pagina == 1) {
         // ── PÁGINA 1: Stats actual (diseño original) ──
 
@@ -170,87 +188,50 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
         //  en x=113, y=53-60. La página 2 sí muestra "2/2".)
 
     } else if (pagina == 2) {
-        // ── PÁGINA 2: Personalidad + edad ──
+        // ── PÁGINA 2: Personalidad (2 ejes) + edad ──
 
-        if (d.renacerConfirmando) {
-            // ── SUB-ESTADO: confirmación de renacer ──
-            // Pantalla entera de advertencia: dos toques para confirmar.
-            u8.setFont(u8g2_font_9x15B_tf);
-            // Centrar "RENACER?" horizontalmente
-            int rw = (int)u8.getStrWidth("RENACER?");
-            u8.drawStr((SCREEN_W - rw) / 2, 28, "RENACER?");
+        // ── HEADER ──
+        u8.setFont(u8g2_font_4x6_tf);
+        u8.drawStr(0, TITULO_Y, "Personalidad");
 
-            u8.setFont(u8g2_font_5x8_tf);
-            const char* linea2 = "borra todo";
-            int l2w = (int)u8.getStrWidth(linea2);
-            u8.drawStr((SCREEN_W - l2w) / 2, 42, linea2);
-
-            const char* linea3 = "pie=confirmar btn=cancelar";
-            // fuente 4x6 para que entre
-            u8.setFont(u8g2_font_4x6_tf);
-            int l3w = (int)u8.getStrWidth(linea3);
-            u8.drawStr((SCREEN_W - l3w) / 2, 56, linea3);
+        // Edad a la derecha: siempre muestra el conteo de días.
+        // Solo si <0 (sin hora válida aún) muestra "s/edad".
+        // "*" indica que todavía está en período de formación.
+        u8.setFont(u8g2_font_5x8_tf);
+        char edadBuf[20];
+        if (d.edadDias < 0) {
+            snprintf(edadBuf, sizeof(edadBuf), "s/edad");
+        } else if (d.edadDias == 1) {
+            bool enForm = (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION);
+            snprintf(edadBuf, sizeof(edadBuf), "1 dia%s", enForm ? "*" : "");
         } else {
-            // ── VISTA NORMAL DE PÁGINA 2 ──
-
-            // ── HEADER ──
-            u8.setFont(u8g2_font_4x6_tf);
-            u8.drawStr(0, TITULO_Y, "Personalidad");
-
-            // Edad a la derecha: siempre muestra el conteo de días.
-            // Solo si <0 (sin hora válida aún) muestra "s/edad".
-            // "*" indica que todavía está en período de formación.
-            u8.setFont(u8g2_font_5x8_tf);
-            char edadBuf[20];
-            if (d.edadDias < 0) {
-                snprintf(edadBuf, sizeof(edadBuf), "s/edad");
-            } else if (d.edadDias == 1) {
-                bool enForm = (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION);
-                snprintf(edadBuf, sizeof(edadBuf), "1 dia%s", enForm ? "*" : "");
-            } else {
-                bool enForm = (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION);
-                snprintf(edadBuf, sizeof(edadBuf), "%d dias%s", d.edadDias, enForm ? "*" : "");
-            }
-            int edadW = (int)u8.getStrWidth(edadBuf);
-            u8.drawStr(SCREEN_W - edadW - 2, FECHA_Y, edadBuf);
-
-            // ── LÍNEA SEPARADORA ──
-            u8.drawHLine(0, SEP_Y, SCREEN_W);
-
-            // ── 4 LÍNEAS DE RASGOS ──
-            // y = 27, 39, 51, 57 (últimas dos más juntas para dejar espacio al hint)
-            u8.setFont(u8g2_font_5x8_tf);
-
-            // Línea 1: Animo (alegre)
-            const char* animoWord = elegirPalabraRasgo(d.alegre, "serio", "alegre", "muy alegre");
-            char anim1[32];
-            snprintf(anim1, sizeof(anim1), "Animo: %s", animoWord);
-            u8.drawStr(0, 27, anim1);
-
-            // Línea 2: Genio (grunon)
-            const char* genioWord = elegirPalabraRasgo(d.grunon, "tranqui", "algo grunon", "muy grunon");
-            char anim2[32];
-            snprintf(anim2, sizeof(anim2), "Genio: %s", genioWord);
-            u8.drawStr(0, 37, anim2);
-
-            // Línea 3: Energia (energetico)
-            const char* enerWord = elegirPalabraRasgo(d.energetico, "calmo", "activo", "muy activo");
-            char anim3[32];
-            snprintf(anim3, sizeof(anim3), "Energia: %s", enerWord);
-            u8.drawStr(0, 47, anim3);
-
-            // Línea 4: Vagueza (perezoso)
-            const char* vagWord = elegirPalabraRasgo(d.perezoso, "inquieto", "algo vago", "muy vago");
-            char anim4[32];
-            snprintf(anim4, sizeof(anim4), "Vagueza: %s", vagWord);
-            u8.drawStr(0, 57, anim4);
-
-            // ── Hint de renacer + indicador de página "2/3" ──
-            // Línea inferior en 4x6: "cabeza:renacer  2/3"
-            u8.setFont(u8g2_font_4x6_tf);
-            u8.drawStr(0, SCREEN_H - 1, "cabeza:renacer");
-            u8.drawStr(SCREEN_W - 12, SCREEN_H - 1, "2/3");
+            bool enForm = (d.edadDias < (int)PERSONALIDAD_DIAS_FORMACION);
+            snprintf(edadBuf, sizeof(edadBuf), "%d dias%s", d.edadDias, enForm ? "*" : "");
         }
+        int edadW = (int)u8.getStrWidth(edadBuf);
+        u8.drawStr(SCREEN_W - edadW - 2, FECHA_Y, edadBuf);
+
+        // ── LÍNEA SEPARADORA ──
+        u8.drawHLine(0, SEP_Y, SCREEN_W);
+
+        // ── 2 EJES BIPOLARES ──
+        u8.setFont(u8g2_font_5x8_tf);
+
+        // Eje ÁNIMO (0=gruñón .. 100=alegre) → d.alegre
+        const char* animoWord = elegirPalabraRasgo(d.alegre, "grunon", "normal", "alegre");
+        char anim1[32];
+        snprintf(anim1, sizeof(anim1), "Animo: %s", animoWord);
+        u8.drawStr(0, 32, anim1);
+
+        // Eje ENERGÍA (0=perezoso .. 100=energético) → d.energetico
+        const char* enerWord = elegirPalabraRasgo(d.energetico, "tranqui", "activo", "muy activo");
+        char anim2[32];
+        snprintf(anim2, sizeof(anim2), "Energia: %s", enerWord);
+        u8.drawStr(0, 48, anim2);
+
+        // ── Indicador de página "2/4" ──
+        u8.setFont(u8g2_font_4x6_tf);
+        u8.drawStr(SCREEN_W - 12, SCREEN_H - 1, "2/4");
 
     } else if (pagina == 3) {
         // ── PÁGINA 3: WiFi + firmware ──
@@ -259,9 +240,9 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
         u8.setFont(u8g2_font_4x6_tf);
         u8.drawStr(0, TITULO_Y, "WiFi y firmware");
 
-        // "3/3" alineado a la derecha en la misma línea del título
-        // Con fuente 4x6: "3/3" = 3 chars × 4 px = 12 px
-        u8.drawStr(SCREEN_W - 12, TITULO_Y, "3/3");
+        // "3/4" alineado a la derecha en la misma línea del título
+        // Con fuente 4x6: "3/4" = 3 chars × 4 px = 12 px
+        u8.drawStr(SCREEN_W - 12, TITULO_Y, "3/4");
 
         // ── LÍNEA SEPARADORA ──
         u8.drawHLine(0, SEP_Y, SCREEN_W);
@@ -306,21 +287,54 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
             }
         }
 
-        // Línea 4 (y=63): estado de sonido + hint de acción
-        // Con fuente 4x6 (4 px/char): cabe ~32 chars en 128 px.
-        // "son:off  cabeza:WiFi pie:actlz" = 30 chars → entra.
+        // Línea 4 (y=63): hint de acción OTA (solo si hay update)
         u8.setFont(u8g2_font_4x6_tf);
-        {
-            const char* sonStr = d.sonidoHabilitado ? "on " : "off";
-            if (d.hayUpdate) {
-                char buf[36];
-                snprintf(buf, sizeof(buf), "son:%s  cab:WiFi pie:actualiz", sonStr);
-                u8.drawStr(0, 63, buf);
-            } else {
-                char buf[36];
-                snprintf(buf, sizeof(buf), "son:%s  mantener:toggle son.", sonStr);
-                u8.drawStr(0, 63, buf);
-            }
+        if (d.hayUpdate) {
+            u8.drawStr(0, 63, "pie: instalar actualizacion");
         }
+
+    } else if (pagina == 4) {
+        // ── PÁGINA 4: Ajustes (sonido / renacer / cambiar WiFi) ──
+
+        // ── HEADER ──
+        u8.setFont(u8g2_font_4x6_tf);
+        u8.drawStr(0, TITULO_Y, "AJUSTES");
+        u8.drawStr(SCREEN_W - 12, TITULO_Y, "4/4");
+
+        // ── LÍNEA SEPARADORA ──
+        u8.drawHLine(0, SEP_Y, SCREEN_W);
+
+        // ── 3 OPCIONES CON CURSOR ──
+        // El cursor ">" marca la opción resaltada (d.ajustesSel).
+        u8.setFont(u8g2_font_5x8_tf);
+        const int OPT_Y0   = 27;   // baseline primera opción
+        const int OPT_STEP = 11;
+
+        // Opción 0: Sonido on/off
+        {
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%cSonido: %s",
+                     d.ajustesSel == 0 ? '>' : ' ',
+                     d.sonidoHabilitado ? "on" : "off");
+            u8.drawStr(0, OPT_Y0, buf);
+        }
+        // Opción 1: Renacer
+        {
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%cRenacer",
+                     d.ajustesSel == 1 ? '>' : ' ');
+            u8.drawStr(0, OPT_Y0 + OPT_STEP, buf);
+        }
+        // Opción 2: Cambiar WiFi
+        {
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%cCambiar WiFi",
+                     d.ajustesSel == 2 ? '>' : ' ');
+            u8.drawStr(0, OPT_Y0 + OPT_STEP * 2, buf);
+        }
+
+        // ── Hint inferior ──
+        u8.setFont(u8g2_font_4x6_tf);
+        u8.drawStr(0, SCREEN_H - 1, "cabeza:mover  pie:elegir");
     }
 }

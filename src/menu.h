@@ -21,18 +21,19 @@ struct MenuData {
     bool    staConectada;     // STA conectada a un AP
     bool    hayUpdate;        // hay actualización disponible
     const char* versionNueva; // versión nueva ("" si no hay)
-    bool    sonidoHabilitado; // estado del sonido (página 3)
-    // Rasgos de personalidad (Etapa C)
-    uint8_t alegre;         // 0-100
-    uint8_t grunon;         // 0-100
-    uint8_t energetico;     // 0-100
-    uint8_t perezoso;       // 0-100
+    bool    sonidoHabilitado; // estado del sonido (página 4 · Ajustes)
+    // Personalidad — 2 ejes bipolares (Etapa C); alegre=animo, energetico=energia
+    uint8_t alegre;         // 0-100 = eje ÁNIMO (0 gruñón .. 100 alegre)
+    uint8_t energetico;     // 0-100 = eje ENERGÍA (0 perezoso .. 100 energético)
     int     edadDias;       // -1 si sin hora válida; < PERSONALIDAD_DIAS_FORMACION si en formación
 
-    // Sub-estado de confirmación de renacer (página 2)
+    // Sub-estado de confirmación de renacer (overlay, cualquier página)
     bool    renacerConfirmando;  // true = esperando confirmación del pie
+
+    // Página 4 · Ajustes: opción resaltada (0=Sonido, 1=Renacer, 2=Cambiar WiFi)
+    uint8_t ajustesSel;
 };
 
 // Dibuja la pantalla de estado completa (no llama clearBuffer/sendBuffer)
-// pagina: 1 = stats actual, 2 = personalidad + edad, 3 = WiFi + firmware
+// pagina: 1 = stats, 2 = personalidad + edad, 3 = WiFi + firmware, 4 = ajustes
 void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina);

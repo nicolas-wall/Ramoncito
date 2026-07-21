@@ -49,7 +49,8 @@ static AppState appState = AppState::IDLE;
 
 static uint32_t menuHasta = 0;
 static const uint32_t MENU_TIMEOUT_MS = 10000;
-static uint8_t  menuPagina = 1;  // paginación del menú: 1 o 2 (Etapa C)
+static uint8_t  menuPagina = 1;  // paginación del menú: 1..4
+static uint8_t  ajustesSel = 0;  // opción resaltada en página 4 (0=Sonido,1=Renacer,2=WiFi)
 
 static uint32_t    reaccionHasta   = 0;
 static const char* reaccionLabel   = "";
@@ -237,7 +238,8 @@ static void despacharEventos(uint32_t ahora) {
             if (ev == InputEvent::BTN_A_PRESS) {
                 ultimoBotonMs = ahora;
                 appState  = AppState::MENU;
-                menuPagina = 1;  // reiniciar en página 1 (Etapa C)
+                menuPagina = 1;  // reiniciar en página 1
+                ajustesSel = 0;
                 menuHasta = ahora + MENU_TIMEOUT_MS;
                 sound.play(Melody::BIP);
             } else if (ev == InputEvent::TOUCH_START) {
@@ -277,91 +279,102 @@ static void despacharEventos(uint32_t ahora) {
             continue;
         }
 
-        // En el menú: botón abre la siguiente página o cierra
+        // En el menú: botón navega páginas; los toques dependen de la página.
         if (appState == AppState::MENU) {
-            if (ev == InputEvent::BTN_A_PRESS) {
-                ultimoBotonMs = ahora;
-                if (renacerConfirmando) {
-                    // Botón cancela la confirmación de renacer
+
+            // ── Overlay de confirmación de renacer: intercepta todo ──
+            if (renacerConfirmando) {
+                if (ev == InputEvent::BTN_A_PRESS) {
+                    ultimoBotonMs = ahora;
                     renacerConfirmando = false;
                     sound.play(Melody::BIP);
                     menuHasta = ahora + MENU_TIMEOUT_MS;
                     Serial.println("[app] renacer cancelado (boton)");
-                } else if (menuPagina == 1) {
-                    // Pasar a página 2
-                    menuPagina = 2;
-                    menuHasta = ahora + MENU_TIMEOUT_MS;
-                    sound.play(Melody::BIP);
-                } else if (menuPagina == 2) {
-                    // Pasar a página 3
-                    menuPagina = 3;
-                    menuHasta = ahora + MENU_TIMEOUT_MS;
-                    sound.play(Melody::BIP);
-                } else {
-                    // menuPagina == 3: iniciar temporizador de long-press.
-                    // La acción (cerrar menú o toggle sonido) se decide cuando
-                    // el botón se suelta o se alcanza el umbral de hold.
-                    btnPulsado         = true;
-                    btnPulsadoDesde    = ahora;
-                    longPressEjecutado = false;
-                    menuHasta          = ahora + MENU_TIMEOUT_MS; // renovar timeout
-                }
-            } else if (menuPagina == 2) {
-                // Acciones táctiles en página 2 (renacer, doble confirmación)
-                bool enLockout = (ultimoBotonMs != 0) &&
-                                 ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
-                if (enLockout) {
-                    Serial.println("[app] touch ignorado (lockout boton, menu p2)");
-                } else if (ev == InputEvent::TOUCH_START) {
-                    if (!renacerConfirmando) {
-                        // Primer toque (cabeza): pedir confirmación
-                        renacerConfirmando   = true;
-                        renacerTimeoutHasta  = ahora + MENU_RENACER_CONFIRM_MS;
-                        menuHasta            = ahora + MENU_TIMEOUT_MS;
-                        sound.play(Melody::BIP);
-                        Serial.println("[app] renacer: aguardando confirmacion (pie=si, btn=no)");
-                    }
                 } else if (ev == InputEvent::TICKLE_START) {
-                    if (renacerConfirmando) {
+                    bool enLockout = (ultimoBotonMs != 0) &&
+                                     ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
+                    if (!enLockout) {
                         // Segundo toque (pie): CONFIRMAR renacer
                         renacerConfirmando = false;
                         time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
                         personality.renacer(nowEpoch);
                         mood.reset();
-                        // Cerrar menú y arrancar animación de nacimiento
                         menuPagina = 1;
-                        btnPulsado         = false;
-                        longPressEjecutado = false;
+                        ajustesSel = 0;
                         dispararNacimiento(ahora);
                         Serial.println("[app] renacer CONFIRMADO — animacion nacimiento");
                     }
                 }
-            } else if (menuPagina == 3) {
-                // Acciones táctiles solo en página 3
+                // TOUCH (cabeza) se ignora durante la confirmación
+                continue;
+            }
+
+            if (ev == InputEvent::BTN_A_PRESS) {
+                ultimoBotonMs = ahora;
+                if (menuPagina < 4) {
+                    // Avanzar de página
+                    menuPagina++;
+                    menuHasta = ahora + MENU_TIMEOUT_MS;
+                    sound.play(Melody::BIP);
+                } else {
+                    // Última página: cerrar el menú
+                    appState = AppState::IDLE;
+                    idleExprActual = mood.dominantExpression();
+                    face.setExpression(idleExprActual);
+                    sound.play(Melody::BIP);
+                    marcarActividad(ahora);
+                    entroADormirMs = ahora;
+                }
+            } else {
+                // Acciones táctiles según la página (con lockout tras botón)
                 bool enLockout = (ultimoBotonMs != 0) &&
                                  ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
                 if (enLockout) {
-                    Serial.println("[app] touch ignorado (lockout boton, menu p3)");
-                } else if (ev == InputEvent::TOUCH_START) {
-                    // Cabeza: cerrar menú y abrir portal WiFi
-                    appState = AppState::IDLE;
-                    idleExprActual = mood.dominantExpression();
-                    face.setExpression(idleExprActual);
-                    marcarActividad(ahora);
-                    entroADormirMs = ahora;
-                    net.startPortal();
-                    sound.play(Melody::BIP);
-                    reaccionar(Expression::SORPRENDIDO, 3000, "portal: espToy-setup", ahora);
-                } else if (ev == InputEvent::TICKLE_START && ota.hayActualizacion()) {
-                    // Pie: instalar actualización (bloqueante)
-                    sound.play(Melody::BIP);
-                    ota.instalarAhora();
-                    // Si vuelve acá, la instalación falló: cerrar el menú limpiamente
-                    appState = AppState::IDLE;
-                    idleExprActual = mood.dominantExpression();
-                    face.setExpression(idleExprActual);
-                    marcarActividad(ahora);
-                    entroADormirMs = ahora;
+                    Serial.println("[app] touch ignorado (lockout boton, menu)");
+                } else if (menuPagina == 3) {
+                    // Página 3: pie instala la actualización OTA (si hay)
+                    if (ev == InputEvent::TICKLE_START && ota.hayActualizacion()) {
+                        sound.play(Melody::BIP);
+                        ota.instalarAhora();
+                        // Si vuelve acá, la instalación falló: cerrar limpio
+                        appState = AppState::IDLE;
+                        idleExprActual = mood.dominantExpression();
+                        face.setExpression(idleExprActual);
+                        marcarActividad(ahora);
+                        entroADormirMs = ahora;
+                    }
+                } else if (menuPagina == 4) {
+                    // Página 4 (Ajustes): cabeza mueve el cursor, pie activa.
+                    if (ev == InputEvent::TOUCH_START) {
+                        ajustesSel = (ajustesSel + 1) % 3;
+                        sound.play(Melody::BIP);
+                        menuHasta = ahora + MENU_TIMEOUT_MS;
+                    } else if (ev == InputEvent::TICKLE_START) {
+                        menuHasta = ahora + MENU_TIMEOUT_MS;
+                        if (ajustesSel == 0) {
+                            // Sonido on/off
+                            bool nuevo = !sound.enabled();
+                            sound.setEnabled(nuevo);
+                            Serial.printf("[app] ajustes: sonido %s\n", nuevo ? "ON" : "OFF");
+                            if (nuevo) sound.play(Melody::BIP);
+                        } else if (ajustesSel == 1) {
+                            // Renacer: pedir confirmación (overlay)
+                            renacerConfirmando  = true;
+                            renacerTimeoutHasta = ahora + MENU_RENACER_CONFIRM_MS;
+                            sound.play(Melody::BIP);
+                            Serial.println("[app] renacer: aguardando confirmacion (pie=si, btn=no)");
+                        } else {
+                            // Cambiar WiFi: cerrar menú y abrir portal
+                            appState = AppState::IDLE;
+                            idleExprActual = mood.dominantExpression();
+                            face.setExpression(idleExprActual);
+                            marcarActividad(ahora);
+                            entroADormirMs = ahora;
+                            net.startPortal();
+                            sound.play(Melody::BIP);
+                            reaccionar(Expression::SORPRENDIDO, 3000, "portal: espToy-setup", ahora);
+                        }
+                    }
                 }
             }
             continue;
@@ -378,7 +391,8 @@ static void despacharEventos(uint32_t ahora) {
                 marcarActividad(ahora);
                 randExprActiva  = false;
                 appState  = AppState::MENU;
-                menuPagina = 1;  // reiniciar en página 1 (Etapa C)
+                menuPagina = 1;  // reiniciar en página 1
+                ajustesSel = 0;
                 menuHasta = ahora + MENU_TIMEOUT_MS;
                 sound.play(Melody::BIP);
                 break;
@@ -458,9 +472,8 @@ static void imprimirEstado() {
                   sound.enabled(),
                   (unsigned long)input.touchValue(),    (unsigned long)input.touchBaseline(),
                   (unsigned long)input.touchValuePie(), (unsigned long)input.touchBaselinePie());
-    Serial.printf("[pers] alegre:%u grunon:%u energetico:%u perezoso:%u | edad:%d dias | factor:%.2f\n",
-                  personality.alegre(), personality.grunon(),
-                  personality.energetico(), personality.perezoso(),
+    Serial.printf("[pers] animo:%u energia:%u | edad:%d dias | factor:%.2f\n",
+                  personality.animo(), personality.energia(),
                   personality.edadDias(), personality.plasticidadFactor());
 }
 
@@ -490,21 +503,21 @@ static void procesarComando(const char* cmd) {
             face.setExpression(mood.dominantExpression());
         } else {
             appState  = AppState::MENU;
-            menuPagina = 1;  // reiniciar en página 1 (Etapa C)
+            menuPagina = 1;  // reiniciar en página 1
+            ajustesSel = 0;
             menuHasta = millis() + MENU_TIMEOUT_MS;
         }
         Serial.printf("[cmd] menu: %d\n", appState == AppState::MENU);
     } else if (cmd[0] == 'q') {
-        int a, g, e, p;
-        if (sscanf(cmd + 1, "%d %d %d %d", &a, &g, &e, &p) == 4) {
-            // q A G E P → fija los 4 rasgos directamente
-            personality.set((uint8_t)a, (uint8_t)g, (uint8_t)e, (uint8_t)p);
-            Serial.printf("[cmd] personalidad fijada A:%d G:%d E:%d P:%d\n", a, g, e, p);
+        int an, en;
+        if (sscanf(cmd + 1, "%d %d", &an, &en) == 2) {
+            // q A E → fija los dos ejes (animo, energia)
+            personality.set((uint8_t)an, (uint8_t)en);
+            Serial.printf("[cmd] personalidad fijada animo:%d energia:%d\n", an, en);
         } else {
-            // q solo → imprime rasgos + edad + factor
-            Serial.printf("[pers] alegre:%u grunon:%u energetico:%u perezoso:%u | edad:%d dias | factor:%.2f\n",
-                          personality.alegre(), personality.grunon(),
-                          personality.energetico(), personality.perezoso(),
+            // q solo → imprime ejes + edad + factor
+            Serial.printf("[pers] animo:%u energia:%u | edad:%d dias | factor:%.2f\n",
+                          personality.animo(), personality.energia(),
                           personality.edadDias(), personality.plasticidadFactor());
         }
     } else if (cmd[0] == 'u') {
@@ -564,7 +577,7 @@ void setup() {
     scheduleSospechoso(ahora);
     sigMuestraPers = ahora + MOOD_TICK_MS / TIME_SCALE;
 
-    Serial.println("[app] listo — comandos: h N | m F E A | s | p | i | n | q | q A G E P | u (OTA)");
+    Serial.println("[app] listo — comandos: h N | m F E A | s | p | i | n | q | q A E | u (OTA)");
 }
 
 // ------------------------------------------------------------
@@ -627,43 +640,8 @@ void loop() {
 
     despacharEventos(ahora);
 
-    // ── Long-press del botón en menú página 3 (toggle sonido) ───
-    // btnPulsado se activa cuando se recibe BTN_A_PRESS en la página 3.
-    // Mientras el botón siga físicamente presionado (input.btnA()), se acumula
-    // tiempo. Al superar MENU_LONGPRESS_MS se ejecuta el toggle UNA sola vez
-    // (longPressEjecutado=true) para ignorar la subsiguiente acción de la soltada.
-    // Si el botón se suelta antes del umbral → press corto → cerrar menú.
-    if (btnPulsado) {
-        if (!input.btnA()) {
-            // El botón fue soltado
-            if (!longPressEjecutado) {
-                // Press corto: cerrar menú como antes
-                appState = AppState::IDLE;
-                idleExprActual = mood.dominantExpression();
-                face.setExpression(idleExprActual);
-                sound.play(Melody::BIP);
-                marcarActividad(ahora);
-                entroADormirMs = ahora;
-            }
-            // En cualquier caso, limpiar el estado de seguimiento
-            btnPulsado         = false;
-            longPressEjecutado = false;
-        } else if (!longPressEjecutado &&
-                   (ahora - btnPulsadoDesde) >= MENU_LONGPRESS_MS) {
-            // Umbral alcanzado: toggle de sonido (una sola vez)
-            longPressEjecutado = true;
-            bool nuevoEstado = !sound.enabled();
-            sound.setEnabled(nuevoEstado);
-            Serial.printf("[app] long-press menu p3: sonido %s\n",
-                          nuevoEstado ? "ON" : "OFF");
-            // Feedback: bip al activar, silencio al desactivar (obvio)
-            if (nuevoEstado) {
-                sound.play(Melody::BIP);
-            }
-        }
-        // Si btnPulsado && longPressEjecutado && input.btnA(): seguir esperando
-        // que lo suelten sin hacer nada más
-    }
+    // (El toggle de sonido por long-press se retiró: ahora vive como
+    //  opción de la página 4 · Ajustes.)
 
     // ── Eventos IMU (acelerómetro MPU6050) ──────────────────────
     // Solo se procesan fuera del MENU (igual que los toques táctiles).
@@ -682,6 +660,8 @@ void loop() {
                 Serial.println("[imu] levantado (durmiendo) → SORPRENDIDO breve");
             } else {
                 // Despierto: cara única de "me alzaron" (ILUSIONADO), sin texto.
+                mood.apply(MoodEffect::LEVANTADO);
+                personality.event(PersEvent::LEVANTADO);
                 sound.play(Melody::FELIZ);
                 reaccionar(Expression::ILUSIONADO, REACCION_TOUCH_MS, "", ahora);
                 Serial.println("[imu] levantado → ILUSIONADO");
@@ -715,13 +695,15 @@ void loop() {
                 if (imu.sacudidasEnVentana() >= (uint8_t)umbralExcesiva) {
                     // Sacudida excesiva → MAREADO + malhumor + sesgo a gruñón
                     malhumorHasta = ahora + personality.malhumorMs();
+                    mood.apply(MoodEffect::SACUDIDA_EXCESIVA);
                     personality.event(PersEvent::ENOJO_COSQUILLAS);
                     sound.play(Melody::ENOJADO);
                     reaccionar(Expression::MAREADO, REACCION_BTN_MS, "", ahora);
                     Serial.printf("[imu] sacudida excesiva (%u, umbral=%d) → MAREADO + malhumor\n",
                                   imu.sacudidasEnVentana(), umbralExcesiva);
                 } else {
-                    // Sacudida leve → sorpresa (sin texto)
+                    // Sacudida leve → sorpresa (sin texto); estimulante, baja aburrimiento
+                    mood.apply(MoodEffect::SACUDIDA_LEVE);
                     sound.play(Melody::BIP);
                     reaccionar(Expression::SORPRENDIDO, REACCION_TOUCH_MS, "", ahora);
                     Serial.printf("[imu] sacudida leve (%u) → SORPRENDIDO%s\n",
@@ -953,8 +935,11 @@ void loop() {
         }
     }
 
-    // Ronquido periódico durmiendo
-    if (appState == AppState::SLEEPING && (int32_t)(ahora - proximoRonquido) >= 0) {
+    // Ronquido periódico durmiendo — solo durante los primeros
+    // RONQUIDO_VENTANA_MS tras quedarse dormido (no se repite para siempre).
+    if (appState == AppState::SLEEPING
+        && (ahora - entroADormirMs) < RONQUIDO_VENTANA_MS
+        && (int32_t)(ahora - proximoRonquido) >= 0) {
         sound.play(Melody::RONQUIDO);
         proximoRonquido = ahora + 2500 + (esp_random() % 1000);
     }
@@ -991,14 +976,14 @@ void loop() {
         md.hayUpdate         = ota.hayActualizacion();
         md.versionNueva      = ota.versionNueva();
         md.sonidoHabilitado  = sound.enabled();
-        // Campos de personalidad (Etapa C)
-        md.alegre      = personality.alegre();
-        md.grunon      = personality.grunon();
-        md.energetico  = personality.energetico();
-        md.perezoso    = personality.perezoso();
+        // Personalidad — 2 ejes (alegre=ánimo, energetico=energía)
+        md.alegre      = personality.animo();
+        md.energetico  = personality.energia();
         md.edadDias    = personality.edadDias();
-        // Sub-estado de confirmación de renacer (página 2)
+        // Sub-estado de confirmación de renacer (overlay)
         md.renacerConfirmando = renacerConfirmando;
+        // Página 4 · Ajustes
+        md.ajustesSel  = ajustesSel;
         menuRender(u8g2, md, menuPagina);
     } else {
         face.render(u8g2);

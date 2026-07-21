@@ -13,7 +13,10 @@
 enum class MoodEffect : uint8_t {
     CARICIA,             // sensor táctil (cabeza)
     COSQUILLAS,          // toque en el pie — felicidad leve
-    COSQUILLAS_SEGUIDAS  // demasiadas cosquillas seguidas → se enoja
+    COSQUILLAS_SEGUIDAS, // demasiadas cosquillas seguidas → se enoja
+    LEVANTADO,           // lo alzan (IMU) — alegría, baja aburrimiento
+    SACUDIDA_LEVE,       // sacudida suave (IMU) — estimulante, baja aburrimiento
+    SACUDIDA_EXCESIVA    // sacudida excesiva (IMU) — molesto, baja felicidad
 };
 
 class Mood {

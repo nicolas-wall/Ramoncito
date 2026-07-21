@@ -187,6 +187,21 @@ void Mood::apply(MoodEffect e) {
             _boredom   = _addSat(_boredom,   10);
             break;
 
+        case MoodEffect::LEVANTADO:
+            _happiness = _addSat(_happiness, 12);
+            _boredom   = _subSat(_boredom,   15);
+            break;
+
+        case MoodEffect::SACUDIDA_LEVE:
+            _happiness = _addSat(_happiness,  3);
+            _boredom   = _subSat(_boredom,    8);
+            break;
+
+        case MoodEffect::SACUDIDA_EXCESIVA:
+            _happiness = _subSat(_happiness, 12);
+            _boredom   = _addSat(_boredom,    8);
+            break;
+
     }
 
     const char* nombre = "?";
@@ -194,6 +209,9 @@ void Mood::apply(MoodEffect e) {
         case MoodEffect::CARICIA:             nombre = "CARICIA";             break;
         case MoodEffect::COSQUILLAS:          nombre = "COSQUILLAS";          break;
         case MoodEffect::COSQUILLAS_SEGUIDAS: nombre = "COSQUILLAS_SEGUIDAS"; break;
+        case MoodEffect::LEVANTADO:           nombre = "LEVANTADO";           break;
+        case MoodEffect::SACUDIDA_LEVE:       nombre = "SACUDIDA_LEVE";       break;
+        case MoodEffect::SACUDIDA_EXCESIVA:   nombre = "SACUDIDA_EXCESIVA";   break;
     }
     Serial.printf("[mood] %s -> F:%u E:%u A:%u\n", nombre, _happiness, _energy, _boredom);
 
