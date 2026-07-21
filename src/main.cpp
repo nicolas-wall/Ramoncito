@@ -604,9 +604,11 @@ void loop() {
         ota.update(ahora);
     }
 
-    // Descansando = sueño nocturno o siesta por agotamiento (cara DORMIDO):
-    // en vez de decaer, recupera energía de a poco.
+    // Descansando = sueño nocturno, standby (pantalla apagada por inactividad)
+    // o siesta por agotamiento (cara DORMIDO): en vez de decaer, recupera
+    // energía de a poco. Sin STANDBY la energía caía a 0 tras un día sin uso.
     bool descansando = (appState == AppState::SLEEPING) ||
+                       (appState == AppState::STANDBY) ||
                        (appState == AppState::IDLE && idleExprActual == Expression::DORMIDO);
     mood.update(ahora, descansando);
     personality.update(ahora);
