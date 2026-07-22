@@ -1155,64 +1155,182 @@ String Net::_htmlPanel() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1020">
 <title>Ramoncito</title>
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#121212;color:#e0e0e0;font-family:sans-serif;padding:16px;
-       display:flex;justify-content:center}
-  .wrap{max-width:460px;width:100%}
-  h1{font-size:1.6rem;text-align:center;margin-bottom:2px}
-  .sub{color:#888;font-size:.8rem;text-align:center;margin-bottom:18px}
-  .card{background:#1e1e1e;border-radius:14px;padding:18px 18px 20px;margin-bottom:14px;
-        box-shadow:0 6px 24px rgba(0,0,0,.5)}
-  .card h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:#7a7a7a;margin-bottom:14px}
-  .row{margin-bottom:14px}
-  .row:last-child{margin-bottom:0}
-  .lbl{display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:5px}
-  .lbl .v{color:#9ecbff}
-  .bar{height:9px;background:#2b2b2b;border-radius:6px;overflow:hidden}
-  .fill{height:100%;border-radius:6px;transition:width .4s}
-  .f-fel{background:#f6c85b}.f-ene{background:#5bd07a}.f-abu{background:#b98bff}
-  .bip{position:relative;height:9px;background:#2b2b2b;border-radius:6px}
-  .bip .mk{position:absolute;top:-3px;width:5px;height:15px;border-radius:3px;background:#9ecbff;transition:left .4s}
-  .ends{display:flex;justify-content:space-between;font-size:.72rem;color:#777;margin-top:4px}
-  .meta{display:flex;justify-content:space-between;font-size:.85rem;color:#bbb;margin-top:2px}
-  .meta+.meta{margin-top:8px}
-  .upd{background:#123a20;color:#7fe0a0;border:1px solid #2d6a45;border-radius:8px;
-       padding:9px 11px;font-size:.85rem;margin-top:6px;display:none}
-  .btn{display:block;width:100%;margin-top:10px;padding:12px;border:none;border-radius:10px;
-       font-size:.98rem;font-weight:600;cursor:pointer;background:#2a2a2a;color:#ddd;border:1px solid #3a3a3a}
-  .btn:active{background:#333}
-  .btn.primary{background:#5b9cf6;color:#000;border:none}
-  .btn.danger{background:#3a1a1a;color:#ff8a8a;border:1px solid #6a2d2d}
-  .btn:disabled{opacity:.4;cursor:default}
-  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
-         background:#2a2a2a;color:#fff;padding:10px 16px;border-radius:10px;font-size:.85rem;
-         box-shadow:0 6px 24px rgba(0,0,0,.6);opacity:0;transition:opacity .3s;pointer-events:none}
-  #toast.show{opacity:1}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  :root{--bg:#0b1020;--card:rgba(255,255,255,.05);--line:rgba(255,255,255,.09);
+        --txt:#e8ecf6;--dim:#8b93a7;--cy:#7fe7ff;--pk:#ff6b9d}
+  body{min-height:100vh;color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       padding:20px 16px 40px;display:flex;justify-content:center;
+       background:radial-gradient(130% 90% at 15% -5%,#1a2550 0%,transparent 55%),
+                  radial-gradient(120% 90% at 95% 0%,#3a1a4d 0%,transparent 50%),var(--bg)}
+  .wrap{max-width:440px;width:100%}
+  .head{text-align:center;margin-bottom:16px}
+  .name{font-size:1.7rem;font-weight:800;letter-spacing:.02em}
+  .net{font-size:.74rem;color:var(--dim);margin-top:2px}
+  .net b{color:var(--cy);font-weight:600}
+
+  /* ---- Cara / pantalla ---- */
+  .screen{position:relative;width:210px;height:132px;margin:14px auto 8px;border-radius:26px;overflow:hidden;
+    background:radial-gradient(120% 140% at 50% 18%,#123049 0%,#0a1628 68%,#050b16 100%);
+    border:1px solid rgba(127,231,255,.18);
+    box-shadow:inset 0 0 34px rgba(0,0,0,.75),0 14px 40px rgba(0,0,0,.55),0 0 0 6px rgba(255,255,255,.02)}
+  .screen::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(rgba(255,255,255,.035) 0 1px,transparent 1px 3px)}
+  .face{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:30px}
+  .eye{position:relative;width:40px;height:40px;border-radius:50%;background:var(--cy);
+    box-shadow:0 0 18px rgba(127,231,255,.8);transition:width .3s,height .3s,transform .3s,background .3s}
+  /* tranquilo: parpadeo */
+  .e-tranquilo .eye,.e-neutral .eye{animation:blink 4.2s infinite}
+  @keyframes blink{0%,90%,100%{transform:scaleY(1)}95%{transform:scaleY(.08)}}
+  /* feliz / riendo: ojos sonrientes */
+  .e-feliz .eye,.e-riendo .eye{background:transparent;height:22px;border-bottom:8px solid var(--cy);
+    border-radius:0 0 46px 46px;box-shadow:none;filter:drop-shadow(0 3px 5px rgba(127,231,255,.55))}
+  .e-riendo .face,.e-riendo.face{animation:hop .5s infinite}
+  @keyframes hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+  /* sorprendido / ilusionado: ojos grandes */
+  .e-sorprendido .eye{width:48px;height:48px}
+  .e-ilusionado .eye{width:46px;height:46px;box-shadow:0 0 26px rgba(127,231,255,.95),0 0 8px #fff inset;
+    animation:pulse 1.1s infinite}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+  /* aburrido: parpados a media asta */
+  .e-aburrido .eye{height:30px;transform:translateY(5px);opacity:.9}
+  .e-aburrido .eye::before{content:"";position:absolute;left:-2px;right:-2px;top:-2px;height:52%;
+    background:#0a1628;border-radius:50% 50% 0 0}
+  /* dormido: lineas finas */
+  .e-dormido .eye{height:6px;border-radius:6px;background:#5aa9c9;box-shadow:none}
+  /* enojado: cejas hacia adentro + tinte */
+  .e-enojado .eye{height:32px;background:#ff9a86;box-shadow:0 0 18px rgba(255,140,120,.7)}
+  .e-enojado .eye::before{content:"";position:absolute;left:-4px;top:-11px;width:48px;height:7px;
+    border-radius:4px;background:#ff9a86;box-shadow:0 0 8px rgba(255,140,120,.6)}
+  .e-enojado .eye.l::before{transform:rotate(20deg)}
+  .e-enojado .eye.r::before{transform:rotate(-20deg)}
+  /* triste: ojos caidos + lagrima */
+  .e-triste .eye{height:38px}
+  .e-triste .eye.l{transform:rotate(13deg)}
+  .e-triste .eye.r{transform:rotate(-13deg)}
+  .e-triste .eye.l::after{content:"";position:absolute;left:8px;top:32px;width:8px;height:11px;
+    background:var(--cy);border-radius:0 60% 55% 55%;animation:tear 2.2s infinite}
+  @keyframes tear{0%{transform:translateY(-4px);opacity:0}30%{opacity:1}100%{transform:translateY(16px);opacity:0}}
+  /* sospechoso: entrecerrados y mirando al costado */
+  .e-sospechoso .eye{width:40px;height:22px;transform:translateX(6px)}
+  /* enamorado: corazones */
+  .e-enamorado .eye{background:transparent;box-shadow:none;width:auto;height:auto;font-size:0}
+  .e-enamorado .eye::after{content:"\2665";font-size:46px;color:var(--pk);line-height:1;
+    text-shadow:0 0 14px rgba(255,107,157,.85);animation:beat .7s infinite;display:block}
+  @keyframes beat{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+  /* mareado: espirales girando */
+  .e-mareado .eye{background:conic-gradient(from 0deg,var(--cy),rgba(127,231,255,.06) 60%,var(--cy));
+    box-shadow:0 0 14px rgba(127,231,255,.5);animation:spin .9s linear infinite}
+  .e-mareado .eye::before{content:"";position:absolute;inset:11px;border-radius:50%;background:#0a1628}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  /* particulas (Zzz, chispa) */
+  .fx{position:absolute;inset:0;pointer-events:none}
+  .zzz{position:absolute;right:26px;top:22px;color:#bfe9ff;font-weight:700;font-size:15px;opacity:0}
+  .e-dormido .zzz{opacity:1;animation:zfloat 2.6s infinite}
+  @keyframes zfloat{0%{transform:translateY(6px) scale(.7);opacity:0}30%{opacity:.9}
+                    100%{transform:translateY(-16px) scale(1.1);opacity:0}}
+  .star{position:absolute;left:120px;top:24px;color:#fff;font-size:16px;opacity:0}
+  .e-ilusionado .star{opacity:1;animation:twk 1s infinite}
+  @keyframes twk{0%,100%{transform:scale(.6) rotate(0);opacity:.3}50%{transform:scale(1.1) rotate(20deg);opacity:1}}
+  .mood{text-align:center;font-size:.95rem;font-weight:600;color:var(--cy);margin-top:2px;min-height:1.2em}
+
+  /* ---- Cards ---- */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 16px 18px;
+    margin-top:14px;backdrop-filter:blur(6px);box-shadow:0 8px 26px rgba(0,0,0,.35)}
+  .card h2{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);margin-bottom:14px}
+
+  .stat{margin-bottom:14px}
+  .stat:last-child{margin-bottom:0}
+  .slbl{display:flex;justify-content:space-between;align-items:center;font-size:.86rem;margin-bottom:6px}
+  .slbl .ic{margin-right:6px}
+  .chip{font-variant-numeric:tabular-nums;font-weight:700;font-size:.8rem;color:var(--txt);
+    background:rgba(255,255,255,.08);padding:1px 8px;border-radius:20px}
+  .track{height:10px;background:rgba(255,255,255,.07);border-radius:20px;overflow:hidden}
+  .fill{height:100%;border-radius:20px;width:0;transition:width .6s cubic-bezier(.4,1.3,.5,1)}
+  .f-fel{background:linear-gradient(90deg,#ffd76b,#ff934c)}
+  .f-ene{background:linear-gradient(90deg,#78f2a6,#25c26b)}
+  .f-abu{background:linear-gradient(90deg,#c39bff,#7a5cff)}
+
+  /* ---- Plot personalidad ---- */
+  .plot{position:relative;width:100%;max-width:250px;aspect-ratio:1/1;margin:2px auto 6px;border-radius:16px;
+    background:
+      linear-gradient(90deg,rgba(255,120,120,.14),transparent 45%,transparent 55%,rgba(120,220,150,.14)),
+      linear-gradient(0deg,rgba(120,150,255,.05),rgba(255,220,120,.10));
+    border:1px solid var(--line)}
+  .plot .grid{position:absolute;inset:0;border-radius:16px;
+    background:linear-gradient(var(--line) 1px,transparent 1px) 0 50%/100% 50%,
+               linear-gradient(90deg,var(--line) 1px,transparent 1px) 50% 0/50% 100%}
+  .dot{position:absolute;width:18px;height:18px;border-radius:50%;background:var(--cy);
+    box-shadow:0 0 16px rgba(127,231,255,.95),0 0 4px #fff inset;transform:translate(-50%,50%);
+    transition:left .6s,bottom .6s}
+  .cnr{position:absolute;font-size:.66rem;color:var(--dim);font-weight:600}
+  .cnr.t{top:6px;left:50%;transform:translateX(-50%)}
+  .cnr.b{bottom:6px;left:50%;transform:translateX(-50%)}
+  .cnr.l{left:7px;top:50%;transform:translateY(-50%) rotate(-90deg)}
+  .cnr.r{right:7px;top:50%;transform:translateY(-50%) rotate(90deg)}
+  .meta{display:flex;justify-content:space-between;font-size:.85rem;color:var(--txt);margin-top:8px}
+  .meta span:first-child{color:var(--dim)}
+
+  .upd{background:linear-gradient(135deg,rgba(40,194,107,.22),rgba(40,194,107,.08));
+    color:#8bf0b4;border:1px solid rgba(40,194,107,.4);border-radius:12px;
+    padding:10px 12px;font-size:.84rem;margin:2px 0 4px;display:none}
+
+  /* ---- Botones ---- */
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;padding:13px;
+    border:1px solid var(--line);border-radius:13px;font-size:.96rem;font-weight:600;cursor:pointer;
+    background:rgba(255,255,255,.06);color:var(--txt);transition:transform .06s,background .2s}
+  .btn:active{transform:scale(.97);background:rgba(255,255,255,.11)}
+  .btn.primary{background:linear-gradient(135deg,#5b9cf6,#7ab3ff);color:#04122b;border:none}
+  .btn.danger{background:rgba(255,90,90,.1);color:#ff8a8a;border-color:rgba(255,90,90,.32)}
+  .btn:disabled{opacity:.4}
+
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);
+    background:rgba(20,26,44,.96);color:#fff;padding:11px 18px;border-radius:12px;font-size:.86rem;
+    border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.6);opacity:0;transition:all .3s;pointer-events:none}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Ramoncito &#x1F916;</h1>
-  <p class="sub" id="sub">conectado &mdash; cargando&hellip;</p>
+  <div class="head">
+    <div class="name">Ramoncito</div>
+    <div class="net" id="net">conectando&hellip;</div>
+  </div>
+
+  <div class="screen">
+    <div class="face e-tranquilo" id="face">
+      <div class="eye l"></div>
+      <div class="eye r"></div>
+      <div class="fx">
+        <div class="zzz">z&#8202;Z</div>
+        <div class="star">&#10022;</div>
+      </div>
+    </div>
+  </div>
+  <div class="mood" id="mood">&nbsp;</div>
 
   <div class="card">
-    <h2>Estado</h2>
-    <div class="row"><div class="lbl"><span>Felicidad</span><span class="v" id="v-fel">--</span></div>
-      <div class="bar"><div class="fill f-fel" id="b-fel"></div></div></div>
-    <div class="row"><div class="lbl"><span>Energ&iacute;a</span><span class="v" id="v-ene">--</span></div>
-      <div class="bar"><div class="fill f-ene" id="b-ene"></div></div></div>
-    <div class="row"><div class="lbl"><span>Aburrimiento</span><span class="v" id="v-abu">--</span></div>
-      <div class="bar"><div class="fill f-abu" id="b-abu"></div></div></div>
+    <h2>Estado de &aacute;nimo</h2>
+    <div class="stat"><div class="slbl"><span><span class="ic">&#9728;&#65039;</span>Felicidad</span><span class="chip" id="v-fel">--</span></div>
+      <div class="track"><div class="fill f-fel" id="b-fel"></div></div></div>
+    <div class="stat"><div class="slbl"><span><span class="ic">&#9889;</span>Energ&iacute;a</span><span class="chip" id="v-ene">--</span></div>
+      <div class="track"><div class="fill f-ene" id="b-ene"></div></div></div>
+    <div class="stat"><div class="slbl"><span><span class="ic">&#128564;</span>Aburrimiento</span><span class="chip" id="v-abu">--</span></div>
+      <div class="track"><div class="fill f-abu" id="b-abu"></div></div></div>
   </div>
 
   <div class="card">
     <h2>Personalidad</h2>
-    <div class="row"><div class="bip"><div class="mk" id="m-animo"></div></div>
-      <div class="ends"><span>gru&ntilde;&oacute;n</span><span>alegre</span></div></div>
-    <div class="row"><div class="bip"><div class="mk" id="m-ener"></div></div>
-      <div class="ends"><span>perezoso</span><span>en&eacute;rgico</span></div></div>
+    <div class="plot">
+      <div class="grid"></div>
+      <span class="cnr t">en&eacute;rgico</span>
+      <span class="cnr b">perezoso</span>
+      <span class="cnr l">gru&ntilde;&oacute;n</span>
+      <span class="cnr r">alegre</span>
+      <div class="dot" id="dot" style="left:50%;bottom:50%"></div>
+    </div>
     <div class="meta"><span>Edad</span><span id="v-edad">--</span></div>
   </div>
 
@@ -1220,41 +1338,47 @@ String Net::_htmlPanel() {
     <h2>Firmware</h2>
     <div class="meta"><span>Versi&oacute;n</span><span id="v-fw">--</span></div>
     <div class="upd" id="upd"></div>
-    <button class="btn" onclick="act('ota_check')">Buscar actualizaci&oacute;n</button>
-    <button class="btn primary" id="btn-inst" style="display:none" onclick="act('ota_install','Instalar la nueva versión? El toy se reinicia.')">Instalar actualizaci&oacute;n</button>
+    <button class="btn" onclick="act('ota_check')"><span>&#128260;</span>Buscar actualizaci&oacute;n</button>
+    <button class="btn primary" id="btn-inst" style="display:none" onclick="act('ota_install','Instalar la nueva versión? El toy se reinicia.')"><span>&#11015;&#65039;</span>Instalar actualizaci&oacute;n</button>
   </div>
 
   <div class="card">
     <h2>Ajustes</h2>
-    <button class="btn" id="btn-snd" onclick="act('sonido')">Sonido</button>
-    <button class="btn" onclick="act('portal','Abrir el portal de WiFi en el toy?')">Cambiar WiFi</button>
-    <button class="btn danger" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')">Renacer</button>
+    <button class="btn" id="btn-snd" onclick="act('sonido')"><span>&#128266;</span>Sonido</button>
+    <button class="btn" onclick="act('portal','Abrir el portal de WiFi en el toy?')"><span>&#128246;</span>Cambiar WiFi</button>
+    <button class="btn danger" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')"><span>&#128293;</span>Renacer</button>
   </div>
 </div>
 <div id="toast"></div>
 
 <script>
+var MOODS={tranquilo:"Tranquilo",neutral:"Tranquilo",feliz:"Feliz",riendo:"Se ríe",triste:"Triste",
+  enojado:"Enojado",sorprendido:"Sorprendido",aburrido:"Aburrido",dormido:"Durmiendo",
+  sospechoso:"Desconfiado",enamorado:"Enamorado",mareado:"Mareado",ilusionado:"Ilusionado"};
 function pct(x){return Math.max(0,Math.min(100,x))+'%';}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
   clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('show');},2600);}
 async function refresh(){
   try{
     var r=await fetch('/api/state');if(!r.ok)return;var s=await r.json();
-    document.getElementById('sub').innerHTML=(s.ssid?('red: '+s.ssid+' &mdash; '):'')+s.ip;
+    document.getElementById('net').innerHTML=(s.ssid?(s.ssid+' &middot; '):'')+'<b>'+s.ip+'</b>';
+    var expr=(s.expr||'tranquilo');
+    document.getElementById('face').className='face e-'+expr;
+    document.getElementById('mood').textContent=MOODS[expr]||'Tranquilo';
     document.getElementById('v-fel').textContent=s.felicidad;
     document.getElementById('v-ene').textContent=s.energia;
     document.getElementById('v-abu').textContent=s.aburrimiento;
     document.getElementById('b-fel').style.width=pct(s.felicidad);
     document.getElementById('b-ene').style.width=pct(s.energia);
     document.getElementById('b-abu').style.width=pct(s.aburrimiento);
-    document.getElementById('m-animo').style.left='calc('+pct(s.animo)+' - 2px)';
-    document.getElementById('m-ener').style.left='calc('+pct(s.energiaPers)+' - 2px)';
+    var dot=document.getElementById('dot');
+    dot.style.left=pct(s.animo);dot.style.bottom=pct(s.energiaPers);
     document.getElementById('v-edad').textContent=(s.edadDias<0?'recién nacido':s.edadDias+' días');
-    document.getElementById('v-fw').textContent=s.fw;
-    document.getElementById('btn-snd').textContent='Sonido: '+(s.sonido?'ON':'OFF');
+    document.getElementById('v-fw').textContent='v'+s.fw;
+    document.getElementById('btn-snd').innerHTML='<span>'+(s.sonido?'🔊':'🔇')+'</span>Sonido: '+(s.sonido?'ON':'OFF');
     var upd=document.getElementById('upd'),inst=document.getElementById('btn-inst');
-    if(s.hayUpdate){upd.style.display='block';upd.textContent='Nueva versión '+s.verNueva+' disponible';
-      inst.style.display='block';}
+    if(s.hayUpdate){upd.style.display='block';upd.textContent='✨ Nueva versión '+s.verNueva+' disponible';
+      inst.style.display='flex';}
     else{upd.style.display='none';inst.style.display='none';}
   }catch(e){}
 }
