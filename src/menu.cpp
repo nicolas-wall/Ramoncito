@@ -287,10 +287,15 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
             }
         }
 
-        // Línea 4 (y=63): hint de acción OTA (solo si hay update)
+        // Línea 4 (y=63): hint de instalar OTA (si hay update) o, si no, la
+        // dirección del panel web para conectarse desde el teléfono.
         u8.setFont(u8g2_font_4x6_tf);
         if (d.hayUpdate) {
             u8.drawStr(0, 63, "pie: instalar actualizacion");
+        } else if (d.lanServerActivo && d.lanIP && d.lanIP[0] != '\0') {
+            char webBuf[32];
+            snprintf(webBuf, sizeof(webBuf), "web: %s", d.lanIP);
+            u8.drawStr(0, 63, webBuf);
         }
 
     } else if (pagina == 4) {

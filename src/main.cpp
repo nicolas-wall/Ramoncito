@@ -1052,6 +1052,12 @@ void loop() {
         md.hayUpdate         = ota.hayActualizacion();
         md.versionNueva      = ota.versionNueva();
         md.sonidoHabilitado  = sound.enabled();
+        // Panel web en la LAN: dirección para conectarse desde el teléfono.
+        // Buffer local: vive hasta que menuRender() retorna (mismo scope).
+        char lanIpBuf[20];
+        snprintf(lanIpBuf, sizeof(lanIpBuf), "%s", net.lanIP().c_str());
+        md.lanServerActivo   = net.lanServerActivo();
+        md.lanIP             = lanIpBuf;
         // Personalidad — 2 ejes (alegre=ánimo, energetico=energía)
         md.alegre      = personality.animo();
         md.energetico  = personality.energia();

@@ -22,6 +22,9 @@ struct MenuData {
     bool    hayUpdate;        // hay actualización disponible
     const char* versionNueva; // versión nueva ("" si no hay)
     bool    sonidoHabilitado; // estado del sonido (página 4 · Ajustes)
+    // Panel web en la LAN (página 3): dirección para conectarse desde el teléfono
+    bool    lanServerActivo;  // true = el dashboard está escuchando en la LAN
+    const char* lanIP;        // IP del toy en la LAN ("" si no conectado)
     // Personalidad — 2 ejes bipolares (Etapa C); alegre=animo, energetico=energia
     uint8_t alegre;         // 0-100 = eje ÁNIMO (0 gruñón .. 100 alegre)
     uint8_t energetico;     // 0-100 = eje ENERGÍA (0 perezoso .. 100 energético)
