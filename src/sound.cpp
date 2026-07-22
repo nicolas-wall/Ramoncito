@@ -1,4 +1,4 @@
-// sound.cpp — Módulo de sonido para espToy
+// sound.cpp — Módulo de sonido para Ramoncito
 // Buzzer pasivo en PIN_BUZZER via LEDC (API arduino-esp32 2.x).
 // Si el buzzer no está conectado, el módulo funciona igual (sin sonido).
 

@@ -1,5 +1,5 @@
-# espToy — Roadmap de construcción
-<!-- Documento 5 de la serie de planificación de espToy -->
+# Ramoncito — Roadmap de construcción
+<!-- Documento 5 de la serie de planificación de Ramoncito -->
 
 Plan de construcción etapa por etapa. Cada etapa es independientemente verificable antes de avanzar a la siguiente. Marcá las tareas completadas con `- [x]`.
 
@@ -14,7 +14,7 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 ### Tareas
 
 - [x] Instalar VS Code + extensión PlatformIO IDE (PlatformIO Core 6.1.19 ya presente)
-- [x] Crear proyecto PlatformIO nuevo en `D:\Claude\espToy`
+- [x] Crear proyecto PlatformIO nuevo en `D:\Claude\Ramoncito`
 - [x] Configurar `platformio.ini`:
   ```ini
   [env:seeed_xiao_esp32s3]
@@ -28,7 +28,7 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 - [x] Flashear (`pio run --target upload`) — COM5, USB nativo, 10 s, hash verificado
 - [x] Abrir monitor serial y verificar salida — ticks 1/s, uptime OK, heap estable en 372660 bytes
 
-**Sabés que está lista cuando:** el monitor serial muestra mensajes periódicos (ej. `"espToy boot OK — tick N"`) y el LED parpadea.
+**Sabés que está lista cuando:** el monitor serial muestra mensajes periódicos (ej. `"Ramoncito boot OK — tick N"`) y el LED parpadea.
 
 ---
 
@@ -149,7 +149,7 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 
 - [x] Credenciales solo en NVS vía portal (nada hardcodeado; `secrets.h` quedó como convención opcional sin uso)
 - [x] Conexión WiFi con timeout de 10 s y fallback (a portal / modo sin hora) — `src/net.cpp`
-- [x] **Portal cautivo**: AP `espToy-setup` (192.168.4.1) con página para elegir red y clave desde el teléfono — verificado activo en hardware; indicador "WiFi: espToy-setup" en pantalla
+- [x] **Portal cautivo**: AP `Ramoncito-setup` (192.168.4.1) con página para elegir red y clave desde el teléfono — verificado activo en hardware; indicador "WiFi: Ramoncito-setup" en pantalla
 - [x] Botón "usar la hora de este teléfono" en el portal (`/settime` con epoch UTC del navegador + `settimeofday`)
 - [x] Decaimiento offline conectado vía `justGotValidTime()` → `applyOfflineDecay()`
 - [x] NTP con `configTime(TZ_OFFSET_S=UTC-3, pool.ntp.org)` + resync diario

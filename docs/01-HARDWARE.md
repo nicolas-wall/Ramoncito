@@ -1,6 +1,6 @@
-# 01 — Hardware del espToy
+# 01 — Hardware del Ramoncito
 
-> Documento 1 de la serie de planificación de espToy — mascota virtual tipo Tamagotchi con cara OLED montada en cuerpo impreso en 3D, basada en Seeed Studio XIAO ESP32-S3.
+> Documento 1 de la serie de planificación de Ramoncito — mascota virtual tipo Tamagotchi con cara OLED montada en cuerpo impreso en 3D, basada en Seeed Studio XIAO ESP32-S3.
 
 ---
 
@@ -156,7 +156,7 @@ uint32_t valor = touchRead(GPIO3);
 | Pasivo (piezo sin oscilador) | Sin circuito oscilador | Solo si se le envía una señal PWM de la frecuencia deseada | Sí |
 | Activo (con oscilador integrado) | Oscilador interno fijo | Siempre el mismo tono cuando se conecta a VCC | No |
 
-Para espToy se necesita el **pasivo**, ya que el firmware genera las notas por PWM.
+Para Ramoncito se necesita el **pasivo**, ya que el firmware genera las notas por PWM.
 
 **Cómo distinguirlos físicamente:**
 - **Pasivo:** suele tener la placa de circuito visible (color verde) en la cara inferior.
@@ -196,7 +196,7 @@ Bien dentro del límite del regulador onboard del XIAO y de la corriente de un p
 
 ## 6. Consideraciones para el cuerpo 3D
 
-Al diseñar o modelar el cuerpo del espToy, tener en cuenta los siguientes puntos de integración:
+Al diseñar o modelar el cuerpo del Ramoncito, tener en cuenta los siguientes puntos de integración:
 
 **OLED:**
 - Ventana rectangular de 28 × 28 mm aprox. (o ajustar al tamaño real del panel activo) en la cara frontal.

@@ -4,7 +4,7 @@
 #include "face.h"
 
 // =============================================================
-//  personality.h — Módulo de personalidad de espToy
+//  personality.h — Módulo de personalidad de Ramoncito
 //  2 ejes bipolares 0-100:
 //    ÁNIMO   (0 = gruñón   .. 100 = alegre)
 //    ENERGÍA (0 = perezoso .. 100 = energético)

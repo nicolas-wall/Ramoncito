@@ -1,5 +1,5 @@
 // =============================================================
-//  personality.cpp — Módulo de personalidad de espToy
+//  personality.cpp — Módulo de personalidad de Ramoncito
 //  2 ejes bipolares 0-100: ÁNIMO (gruñón↔alegre) y
 //  ENERGÍA (perezoso↔energético). Los 4 rasgos clásicos se
 //  derivan de estos ejes (ver personality.h).

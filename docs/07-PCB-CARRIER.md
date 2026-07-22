@@ -1,4 +1,4 @@
-# espToy — Placa carrier (Camino A)
+# Ramoncito — Placa carrier (Camino A)
 
 Placa que sostiene el **XIAO ESP32-S3** + los módulos que ya se usan y probaron.
 El firmware NO cambia: mismos pines. La placa solo reemplaza el cableado.

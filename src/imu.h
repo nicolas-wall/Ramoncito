@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // =============================================================
-//  imu.h — Módulo IMU (MPU6050 por Wire crudo) para espToy
+//  imu.h — Módulo IMU (MPU6050 por Wire crudo) para Ramoncito
 //
 //  Lee aceleración del MPU6050 en 0x69 (AD0 a 3V3) compartiendo
 //  el bus I2C con el OLED y el RTC DS3231.

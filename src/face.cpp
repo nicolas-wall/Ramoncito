@@ -1,5 +1,5 @@
 // =============================================================
-//  face.cpp — Motor de cara y expresiones para espToy
+//  face.cpp — Motor de cara y expresiones para Ramoncito
 //  Plataforma : Seeed XIAO ESP32-S3
 //  Display    : OLED SSD1309 128×64, librería U8g2
 //

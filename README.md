@@ -1,4 +1,4 @@
-# espToy
+# Ramoncito
 
 Mascota virtual tipo Tamagotchi construida sobre el **Seeed Studio XIAO ESP32-S3**,
 con pantalla OLED SSD1309 128×64, y un juego de Pong oculto.

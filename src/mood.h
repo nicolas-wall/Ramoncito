@@ -4,7 +4,7 @@
 #include "face.h"
 
 // =============================================================
-//  mood.h — Cerebro Tamagotchi de espToy
+//  mood.h — Cerebro Tamagotchi de Ramoncito
 //  Estado interno: happiness, energy, boredom (0-100 c/u)
 //  Decaimiento temporal, efectos de interacción, persistencia NVS.
 // =============================================================

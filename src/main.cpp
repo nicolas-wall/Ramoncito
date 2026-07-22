@@ -1,5 +1,5 @@
 // =============================================================
-//  espToy — main.cpp
+//  Ramoncito — main.cpp
 //  Orquestador: máquina de estados, eventos, mood/sound/net.
 //
 //  Interacciones (Etapa A — doc 06 §1):
@@ -192,6 +192,24 @@ static void dispararNacimiento(uint32_t ahora) {
     Serial.println("[app] animacion nacimiento CRT iniciada");
 }
 
+// Nombre corto de la expresión para el panel web (WebData.expresion).
+static const char* nombreExpresion(Expression e) {
+    switch (e) {
+        case Expression::FELIZ:      return "feliz";
+        case Expression::TRISTE:     return "triste";
+        case Expression::ENOJADO:    return "enojado";
+        case Expression::SORPRENDIDO:return "sorprendido";
+        case Expression::ABURRIDO:   return "aburrido";
+        case Expression::DORMIDO:    return "dormido";
+        case Expression::SOSPECHOSO: return "sospechoso";
+        case Expression::AMOR:       return "enamorado";
+        case Expression::RISA:       return "riendo";
+        case Expression::MAREADO:    return "mareado";
+        case Expression::ILUSIONADO: return "ilusionado";
+        default:                     return "tranquilo";
+    }
+}
+
 // ------------------------------------------------------------
 static void entrarStandby() {
     randExprActiva     = false;
@@ -372,7 +390,7 @@ static void despacharEventos(uint32_t ahora) {
                             entroADormirMs = ahora;
                             net.startPortal();
                             sound.play(Melody::BIP);
-                            reaccionar(Expression::SORPRENDIDO, 3000, "portal: espToy-setup", ahora);
+                            reaccionar(Expression::SORPRENDIDO, 3000, "portal: Ramoncito-setup", ahora);
                         }
                     }
                 }
@@ -544,7 +562,7 @@ void setup() {
     delay(1500);
 
     Serial.println("=========================================");
-    Serial.printf ("  espToy boot OK | FW: %s\n", FW_VERSION);
+    Serial.printf ("  Ramoncito boot OK | FW: %s\n", FW_VERSION);
     Serial.println("=========================================");
 
     pinMode(PIN_LED, OUTPUT);
@@ -613,6 +631,62 @@ void loop() {
     mood.update(ahora, descansando);
     personality.update(ahora);
     sound.update(ahora);
+
+    // ── Panel web en la LAN ─────────────────────────────────────
+    // Refrescar el snapshot que lee el dashboard (barato, cada frame).
+    {
+        WebData wd;
+        wd.felicidad    = mood.happiness();
+        wd.energia      = mood.energy();
+        wd.aburrimiento = mood.boredom();
+        wd.animo        = personality.animo();
+        wd.energia_pers = personality.energia();
+        wd.edadDias     = personality.edadDias();
+        wd.sonido       = sound.enabled();
+        wd.hayUpdate    = ota.hayActualizacion();
+        snprintf(wd.fwVersion,    sizeof(wd.fwVersion),    "%s", FW_VERSION);
+        snprintf(wd.versionNueva, sizeof(wd.versionNueva), "%s", ota.versionNueva());
+        snprintf(wd.expresion,    sizeof(wd.expresion),    "%s", nombreExpresion(idleExprActual));
+        net.setWebData(wd);
+    }
+
+    // Acciones disparadas desde el panel web (se ejecutan acá, fuera del
+    // handler HTTP, para no bloquear ni reiniciar en medio de la respuesta).
+    switch (net.takeWebAction()) {
+        case WebAction::TOGGLE_SONIDO:
+            sound.setEnabled(!sound.enabled());
+            Serial.printf("[web] sonido: %s\n", sound.enabled() ? "ON" : "OFF");
+            if (sound.enabled()) sound.play(Melody::BIP);
+            break;
+        case WebAction::OTA_CHECK:
+            Serial.println("[web] chequeo OTA forzado");
+            ota.forzarChequeo();
+            break;
+        case WebAction::OTA_INSTALL:
+            if (ota.hayActualizacion()) {
+                Serial.println("[web] instalando OTA desde el panel");
+                ota.instalarAhora();   // bloqueante + reinicio si OK
+            }
+            break;
+        case WebAction::ABRIR_PORTAL:
+            Serial.println("[web] abriendo portal WiFi desde el panel");
+            net.startPortal();
+            break;
+        case WebAction::RENACER: {
+            Serial.println("[web] RENACER confirmado desde el panel");
+            time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
+            personality.renacer(nowEpoch);
+            mood.reset();
+            menuPagina = 1;
+            ajustesSel = 0;
+            renacerConfirmando = false;
+            dispararNacimiento(ahora);
+            break;
+        }
+        case WebAction::NINGUNA:
+        default:
+            break;
+    }
 
     // Hora recién validada -> decaimiento offline (una sola vez)
     if (net.justGotValidTime()) {
@@ -1001,7 +1075,7 @@ void loop() {
         ultimoLog = ahora;
         fpsActual = framesEnVentana * 1000 / INTERVALO_LOG_MS;
         framesEnVentana = 0;
-        Serial.printf("espToy | fps:%lu heap:%lu | F:%u E:%u A:%u | hora:%d noche:%d | est:%d | tc:%lu/%lu tp:%lu/%lu\n",
+        Serial.printf("Ramoncito | fps:%lu heap:%lu | F:%u E:%u A:%u | hora:%d noche:%d | est:%d | tc:%lu/%lu tp:%lu/%lu\n",
                       (unsigned long)fpsActual, (unsigned long)ESP.getFreeHeap(),
                       mood.happiness(), mood.energy(), mood.boredom(),
                       net.hourNow(), esNoche, (int)appState,

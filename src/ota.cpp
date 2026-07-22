@@ -1,5 +1,5 @@
 // =============================================================
-//  espToy — ota.cpp
+//  Ramoncito — ota.cpp
 //  Auto-OTA por internet: pull desde GitHub Releases.
 //  El chequeo de versión es automático (boot + cada 24 h); la
 //  instalación SOLO se ejecuta cuando el usuario la confirma

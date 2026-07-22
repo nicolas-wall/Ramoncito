@@ -1,5 +1,5 @@
 // =============================================================
-//  espToy — ota.h
+//  Ramoncito — ota.h
 //  Auto-OTA por internet: CHEQUEO automático de versión nueva en
 //  GitHub Releases. La instalación NUNCA es automática: la
 //  confirma el usuario (menú → instalarAhora()).

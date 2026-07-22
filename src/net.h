@@ -1,5 +1,5 @@
 // =============================================================
-//  espToy — net.h
+//  Ramoncito — net.h
 //  Módulo de red: WiFi, NTP, hora local, ciclo día/noche,
 //  portal cautivo de configuración.
 //  Plataforma: Seeed XIAO ESP32-S3 / arduino-esp32 2.0.17
@@ -7,6 +7,34 @@
 #pragma once
 #include <Arduino.h>
 #include <time.h>
+
+// Snapshot de estado que main.cpp refresca cada frame para el panel web de la
+// LAN (mismo patrón que MenuData del menú del OLED). Solo lectura desde los
+// handlers HTTP; se copia por valor, sin punteros que puedan quedar colgados.
+struct WebData {
+    uint8_t felicidad   = 0;
+    uint8_t energia     = 0;
+    uint8_t aburrimiento= 0;
+    uint8_t animo       = 50;   // 0 gruñón .. 100 alegre
+    uint8_t energia_pers= 50;   // 0 perezoso .. 100 energético
+    int     edadDias    = -1;
+    bool    sonido      = true;
+    bool    hayUpdate   = false;
+    char    fwVersion[16]   = {0};
+    char    versionNueva[16]= {0};
+    char    expresion[16]   = {0};   // nombre de la expresión/estado actual
+};
+
+// Acción disparada desde el panel web; main.cpp la consume con takeWebAction()
+// y la ejecuta en su loop (nunca dentro del handler HTTP, que no debe bloquear).
+enum class WebAction : uint8_t {
+    NINGUNA,
+    TOGGLE_SONIDO,
+    RENACER,
+    OTA_CHECK,
+    OTA_INSTALL,
+    ABRIR_PORTAL
+};
 
 class Net {
 public:
@@ -49,6 +77,20 @@ public:
     // Para el menú de estado:
     bool hasCredentials() const { return _ssid.length() > 0; }
     const char* ssidGuardado() const { return _ssid.c_str(); }
+
+    // ----- Panel web en la LAN --------------------------------------
+    // main.cpp refresca el snapshot cada frame (barato: copia por valor).
+    void setWebData(const WebData& d) { _web = d; }
+    // main.cpp consume la acción pendiente cada frame y la ejecuta.
+    WebAction takeWebAction() {
+        WebAction a = _accionWeb;
+        _accionWeb = WebAction::NINGUNA;
+        return a;
+    }
+    // true si el server está atendiendo sobre la STA (dashboard accesible).
+    bool lanServerActivo() const { return _lanServer; }
+    // IP del toy en la LAN ("" si no conectado) para mostrarla en el OLED.
+    String lanIP() const;
 
 private:
     // ----- Estado interno -----------------------------------------
@@ -101,13 +143,21 @@ private:
     bool     _cierrePendiente     = false; // cierre diferido programado desde un handler
     uint32_t _tCierrePortal       = 0;     // millis() a partir del cual cerrar
 
+    // ----- Panel web en la LAN ------------------------------------
+    bool      _lanServer    = false;              // server atendiendo sobre la STA
+    bool      _mdnsIniciado = false;              // mDNS ya arrancado (ramoncito.local)
+    WebData   _web{};                             // snapshot que refresca main.cpp
+    WebAction _accionWeb    = WebAction::NINGUNA; // acción pendiente para main.cpp
+
     String _scanCache;   // resultado del último scan de redes, ya como <li>...
 
     // ----- Métodos privados ----------------------------------------
     void _cargarCredenciales();
     void _iniciarConexion();
     void _iniciarPortal();
-    void _detenerPortal();               // softAPdisconnect + stop de server/dns
+    void _registrarRutas();              // crea _server y registra handlers (una sola vez)
+    void _iniciarLanServer();            // mantiene el HTTP vivo sobre la STA + mDNS
+    void _detenerPortal(bool mantenerServer = false); // softAPdisconnect + dns->stop (server opcional)
     void _atenderPortal();               // dns + http + recolección del scan async
     void _lanzarScan();                  // scan async (nunca bloquea)
     void _regenerarScanCache(int n);     // arma los <li> desde los resultados
@@ -124,6 +174,13 @@ private:
     void _handleOtaGet();     // GET  /update — formulario de subida
     void _handleOtaPost();    // POST /update — respuesta con resultado + restart
     void _handleOtaUpload();  // callback de upload del WebServer
+
+    // Handlers del panel web en la LAN
+    bool _panelAutorizado();  // Basic Auth (OTA_USUARIO/OTA_CLAVE); false ⇒ ya pidió login
+    void _handlePanel();      // GET  /panel — dashboard HTML
+    void _handleApiState();   // GET  /api/state — snapshot en JSON
+    void _handleApiAction();  // GET  /api/action?do=... — encola una WebAction
+    String _htmlPanel();      // HTML del dashboard (auto-refresca vía /api/state)
 
     // Genera el HTML del portal (strings en RAM; se descarta tras enviar)
     String _htmlPortal();

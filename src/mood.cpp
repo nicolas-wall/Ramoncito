@@ -1,5 +1,5 @@
 // =============================================================
-//  mood.cpp — Cerebro Tamagotchi de espToy
+//  mood.cpp — Cerebro Tamagotchi de Ramoncito
 //  Estado: happiness, energy, boredom (0–100 c/u)
 //  Decaimiento por ticks periódicos, efectos de interacción,
 //  persistencia en NVS mediante Preferences.

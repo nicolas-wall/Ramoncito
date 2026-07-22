@@ -1,8 +1,8 @@
 // =============================================================
-//  espToy — net.cpp
+//  Ramoncito — net.cpp
 //  Implementación del módulo de red.
 //
-//  FILOSOFÍA: el AP de setup "espToy-setup" debe estar SIEMPRE encendido y
+//  FILOSOFÍA: el AP de setup "Ramoncito-setup" debe estar SIEMPRE encendido y
 //  visible desde el segundo 1, pase lo que pase con la conexión STA. Con
 //  credenciales, el arranque va DIRECTO a PORTAL en AP_STA (softAP + DNS +
 //  HTTP atendiendo) y la STA se reintenta de fondo. El AP no se apaga nunca
@@ -38,8 +38,8 @@
 //  El portal cautivo responde también a las sondas de Android/iOS para
 //  que el teléfono muestre la notificación de "iniciar sesión".
 //
-//  ACTUALIZACIÓN OTA: conectarse al AP espToy-setup → http://192.168.4.1/update
-//  → usuario/clave esptoy/esptoy → elegir firmware.bin y pulsar "Actualizar".
+//  ACTUALIZACIÓN OTA: conectarse al AP Ramoncito-setup → http://192.168.4.1/update
+//  → usuario/clave ramoncito/ramoncito → elegir firmware.bin y pulsar "Actualizar".
 // =============================================================
 
 #include "net.h"
@@ -48,6 +48,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+#include <ESPmDNS.h>      // ramoncito.local en la LAN
 #include <Preferences.h>
 #include <Update.h>       // OTA por web
 
@@ -115,6 +116,11 @@ void Net::begin() {
 //  update() — llamar en cada frame/loop, SIN delay()
 // ================================================================
 void Net::update(uint32_t now) {
+    // Panel LAN: atender el HTTP sobre la STA fuera del portal (el portal ya
+    // llama a handleClient() en _atenderPortal(); acá cubrimos REPOSO y el
+    // resync). Barato: sin clientes, handleClient() retorna enseguida.
+    if (_lanServer && !_portalActivo && _server) _server->handleClient();
+
     switch (_estado) {
 
         // ---- CONECTANDO ------------------------------------------
@@ -198,13 +204,15 @@ void Net::update(uint32_t now) {
                               ti.tm_mday, ti.tm_mon + 1, ti.tm_year + 1900);
                 _tUltimaSync = now;
                 _ultimoError = "";
-                // El portal ya cumplió: cerrarlo si estaba activo
-                if (_portalActivo) _detenerPortal();
-                if (OTA_AUTO_HABILITADO) {
-                    // El auto-OTA necesita internet: mantener la STA viva
-                    // (solo se baja el AP). Costo: algo más de consumo y de
-                    // ruido en el touch; se revisará con la versión a batería.
+                // El portal ya cumplió: cerrarlo (conservando el HTTP si vamos
+                // a servir el panel LAN sobre la STA).
+                if (_portalActivo) _detenerPortal(PANEL_LAN_HABILITADO);
+                if (OTA_AUTO_HABILITADO || PANEL_LAN_HABILITADO) {
+                    // El auto-OTA y el panel LAN necesitan la STA viva (solo se
+                    // baja el AP). Costo: algo más de consumo y de ruido en el
+                    // touch; se revisará con la versión a batería.
                     WiFi.mode(WIFI_STA);
+                    _iniciarLanServer();
                 } else {
                     // Apagar WiFi para ahorrar energía y reducir ruido táctil
                     WiFi.disconnect(true);
@@ -253,8 +261,10 @@ void Net::update(uint32_t now) {
 
             // Cierre diferido programado por /settime (nunca dentro del handler)
             if (_cierrePendiente && (int32_t)(now - _tCierrePortal) >= 0) {
-                _detenerPortal();
-                if (_portalConSTA && WiFi.status() != WL_CONNECTED) {
+                bool conectado = (WiFi.status() == WL_CONNECTED);
+                // Conservar el HTTP solo si vamos a servir el panel LAN (STA viva)
+                _detenerPortal(PANEL_LAN_HABILITADO && conectado);
+                if (_portalConSTA && !conectado) {
                     // Quedan credenciales sin conectar: seguir reintentando
                     // la STA en silencio, ya sin AP.
                     Serial.println("[net] portal cerrado — sigo reintentando la conexión en silencio");
@@ -263,9 +273,10 @@ void Net::update(uint32_t now) {
                     _reintentosRestantes = MAX_REINTENTOS_SILENCIOSOS;
                     _tInicioConexion = now - WIFI_TIMEOUT_MS; // timeout ya vencido: gate por _tUltimoBegin
                     _estado = Estado::CONECTANDO;
-                } else if (OTA_AUTO_HABILITADO && WiFi.status() == WL_CONNECTED) {
-                    // STA ya conectada: mantenerla viva para el auto-OTA
+                } else if ((OTA_AUTO_HABILITADO || PANEL_LAN_HABILITADO) && conectado) {
+                    // STA ya conectada: mantenerla viva para el auto-OTA y el panel
                     WiFi.mode(WIFI_STA);
+                    _iniciarLanServer();
                     _estado = Estado::REPOSO;
                 } else {
                     WiFi.disconnect(true);
@@ -325,9 +336,10 @@ void Net::update(uint32_t now) {
                         _tUltimaSync = now;
                         _ultimoError = "";
                         _marcarHoraValida();
-                        _detenerPortal();
-                        if (OTA_AUTO_HABILITADO) {
-                            WiFi.mode(WIFI_STA);   // mantener STA para el auto-OTA
+                        _detenerPortal(PANEL_LAN_HABILITADO);
+                        if (OTA_AUTO_HABILITADO || PANEL_LAN_HABILITADO) {
+                            WiFi.mode(WIFI_STA);   // mantener STA para el auto-OTA y el panel
+                            _iniciarLanServer();
                         } else {
                             WiFi.disconnect(true);
                             WiFi.mode(WIFI_OFF);
@@ -501,37 +513,7 @@ void Net::_iniciarPortal() {
 
     // WebServer: crear y registrar rutas UNA sola vez (re-registrar en
     // cada apertura duplicaría los handlers); luego solo begin()/stop().
-    if (!_server) {
-        _server = new WebServer(80);
-
-        _server->on("/", [this]() { _handleRoot(); });
-        _server->on("/save", HTTP_POST, [this]() { _handleSave(); });
-        _server->on("/settime", [this]() { _handleSetTime(); });
-        _server->on("/scan", [this]() { _handleScan(); });
-
-        // Rutas OTA (solo si habilitado en config.h)
-        if (OTA_HABILITADO) {
-            _server->on("/update", HTTP_GET,  [this]() { _handleOtaGet(); });
-            _server->on("/update", HTTP_POST,
-                [this]() { _handleOtaPost(); },
-                [this]() { _handleOtaUpload(); }
-            );
-        }
-
-        // Sondas de portal cautivo de Android, iOS, Windows
-        _server->on("/generate_204",             [this]() { _handleCaptiveRedirect(); });
-        _server->on("/gen_204",                  [this]() { _handleCaptiveRedirect(); });
-        _server->on("/hotspot-detect.html",      [this]() { _handleCaptiveRedirect(); });
-        _server->on("/library/test/success.html",[this]() { _handleCaptiveRedirect(); });
-        _server->on("/connecttest.txt",          [this]() { _handleCaptiveRedirect(); });
-        _server->on("/redirect",                 [this]() { _handleCaptiveRedirect(); });
-        _server->on("/canonical.html",           [this]() { _handleCaptiveRedirect(); });
-        _server->on("/success.txt",              [this]() { _handleCaptiveRedirect(); });
-        _server->on("/ncsi.txt",                 [this]() { _handleCaptiveRedirect(); });
-
-        // Cualquier ruta no reconocida → redirigir al portal
-        _server->onNotFound([this]() { _handleCaptiveRedirect(); });
-    }
+    _registrarRutas();
     _server->begin();
 
     _cierrePendiente     = false;
@@ -542,18 +524,93 @@ void Net::_iniciarPortal() {
 }
 
 // ================================================================
-//  _detenerPortal() — apaga AP, DNS y HTTP. NO destruye los objetos
-//  (se reutilizan si el portal vuelve a abrirse). Llamar SIEMPRE
-//  desde update(), nunca desde un handler del WebServer.
+//  _registrarRutas() — crea _server y registra TODOS los handlers una
+//  sola vez (portal + OTA + panel LAN + sondas cautivas). Reutilizado
+//  por _iniciarPortal() y _iniciarLanServer(); re-registrar duplicaría
+//  handlers, así que el cuerpo entero se guarda con !_server.
 // ================================================================
-void Net::_detenerPortal() {
+void Net::_registrarRutas() {
+    if (_server) return;   // ya creado y con rutas
+    _server = new WebServer(80);
+
+    _server->on("/", [this]() { _handleRoot(); });
+    _server->on("/save", HTTP_POST, [this]() { _handleSave(); });
+    _server->on("/settime", [this]() { _handleSetTime(); });
+    _server->on("/scan", [this]() { _handleScan(); });
+
+    // Rutas OTA (solo si habilitado en config.h)
+    if (OTA_HABILITADO) {
+        _server->on("/update", HTTP_GET,  [this]() { _handleOtaGet(); });
+        _server->on("/update", HTTP_POST,
+            [this]() { _handleOtaPost(); },
+            [this]() { _handleOtaUpload(); }
+        );
+    }
+
+    // Panel web en la LAN (dashboard + API de estado y acciones)
+    if (PANEL_LAN_HABILITADO) {
+        _server->on("/panel",       [this]() { _handlePanel(); });
+        _server->on("/api/state",   [this]() { _handleApiState(); });
+        _server->on("/api/action",  [this]() { _handleApiAction(); });
+    }
+
+    // Sondas de portal cautivo de Android, iOS, Windows
+    _server->on("/generate_204",             [this]() { _handleCaptiveRedirect(); });
+    _server->on("/gen_204",                  [this]() { _handleCaptiveRedirect(); });
+    _server->on("/hotspot-detect.html",      [this]() { _handleCaptiveRedirect(); });
+    _server->on("/library/test/success.html",[this]() { _handleCaptiveRedirect(); });
+    _server->on("/connecttest.txt",          [this]() { _handleCaptiveRedirect(); });
+    _server->on("/redirect",                 [this]() { _handleCaptiveRedirect(); });
+    _server->on("/canonical.html",           [this]() { _handleCaptiveRedirect(); });
+    _server->on("/success.txt",              [this]() { _handleCaptiveRedirect(); });
+    _server->on("/ncsi.txt",                 [this]() { _handleCaptiveRedirect(); });
+
+    // Cualquier ruta no reconocida → redirigir a la raíz (portal o panel)
+    _server->onNotFound([this]() { _handleCaptiveRedirect(); });
+}
+
+// ================================================================
+//  _iniciarLanServer() — mantiene el HTTP escuchando sobre la STA (tu
+//  WiFi de casa) para el panel del teléfono, y publica esptoy.local por
+//  mDNS. Se llama cuando el portal se cierra pero la STA queda viva.
+//  Idempotente: begin()/MDNS.begin() se pueden repetir sin efecto.
+// ================================================================
+void Net::_iniciarLanServer() {
+    if (!PANEL_LAN_HABILITADO) return;
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    _registrarRutas();     // no-op si ya existían
+    _server->begin();      // reanuda la escucha (ahora sobre la STA)
+
+    // mDNS: http://ramoncito.local sin tener que cazar la IP.
+    if (!_mdnsIniciado) {
+        if (MDNS.begin(PANEL_MDNS_HOST)) {
+            MDNS.addService("http", "tcp", 80);
+            _mdnsIniciado = true;
+            Serial.printf("[net] panel LAN activo — http://%s.local  (IP %s)\n",
+                          PANEL_MDNS_HOST, WiFi.localIP().toString().c_str());
+        } else {
+            Serial.println("[net] advertencia: no pude iniciar mDNS (uso solo la IP)");
+        }
+    }
+    _lanServer = true;
+}
+
+// ================================================================
+//  _detenerPortal() — apaga AP y DNS. El HTTP se conserva si
+//  mantenerServer=true (para seguir sirviendo el panel sobre la STA).
+//  NO destruye los objetos (se reutilizan). Llamar SIEMPRE desde
+//  update(), nunca desde un handler del WebServer.
+// ================================================================
+void Net::_detenerPortal(bool mantenerServer) {
     if (!_portalActivo) return;
-    if (_dns)    _dns->stop();
-    if (_server) _server->stop();
+    if (_dns) _dns->stop();
+    if (_server && !mantenerServer) _server->stop();
     WiFi.softAPdisconnect(true);
     _portalActivo    = false;
     _cierrePendiente = false;
-    Serial.println("[net] portal cautivo detenido");
+    Serial.printf("[net] portal cautivo detenido%s\n",
+                  mantenerServer ? " (HTTP sigue en la STA para el panel)" : "");
 }
 
 // ================================================================
@@ -633,7 +690,7 @@ String Net::_htmlPortal() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>espToy Setup</title>
+<title>Ramoncito Setup</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:#121212;color:#e0e0e0;font-family:sans-serif;
@@ -671,7 +728,7 @@ String Net::_htmlPortal() {
 </head>
 <body>
 <div class="card">
-  <h1>espToy 🤖</h1>
+  <h1>Ramoncito 🤖</h1>
 )rawhtml";
 
     // Subtítulo según el modo
@@ -715,7 +772,7 @@ String Net::_htmlPortal() {
     html += R"rawhtml(
   <!-- Sección hora del teléfono -->
   <p style="font-size:0.85rem;color:#aaa;margin-bottom:12px">
-    Poné en hora tu espToy directamente desde este teléfono.
+    Poné en hora tu Ramoncito directamente desde este teléfono.
   </p>
   <button class="btn btn-secondary" onclick="enviarHora()">
     Usar la hora de este teléfono
@@ -767,6 +824,13 @@ function rescan() {
 // ================================================================
 
 void Net::_handleRoot() {
+    // En la LAN (portal cerrado, server sobre la STA) la raíz muestra el panel;
+    // así se entra directo a http://ramoncito.local sin recordar /panel.
+    if (!_portalActivo && _lanServer) {
+        _handlePanel();
+        return;
+    }
+
     // Pedido explícito del usuario (abrió la página): si no hay caché de
     // redes, intentar un scan. _lanzarScan() ya garantiza no molestar si
     // hubo un begin() hace <20 s o hay un scan corriendo.
@@ -807,7 +871,7 @@ void Net::_handleSave() {
         "display:flex;justify-content:center;align-items:center;height:100vh}"
         ".card{text-align:center;padding:32px;background:#1e1e1e;border-radius:16px}"
         "h2{margin-bottom:12px}p{color:#888;font-size:.9rem}</style></head>"
-        "<body><div class='card'><h2>espToy 🤖</h2>"
+        "<body><div class='card'><h2>Ramoncito 🤖</h2>"
         "<p>Credenciales guardadas.<br>El dispositivo se reiniciará y conectará a<br>"
         "<strong>" + nuevoSsid + "</strong></p></div></body></html>");
 
@@ -900,7 +964,7 @@ void Net::_handleOtaGet() {
         "<head>"
         "<meta charset='UTF-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>espToy \xe2\x80\x94 Actualizar firmware</title>"
+        "<title>Ramoncito \xe2\x80\x94 Actualizar firmware</title>"
         "<style>"
         "*{box-sizing:border-box;margin:0;padding:0}"
         "body{background:#121212;color:#e0e0e0;font-family:sans-serif;"
@@ -919,7 +983,7 @@ void Net::_handleOtaGet() {
         "</style>"
         "</head>"
         "<body><div class='card'>"
-        "<h1>espToy &#x1F916; Firmware</h1>"
+        "<h1>Ramoncito &#x1F916; Firmware</h1>"
         "<p class='ver'>Versi\xc3\xb3n actual: " FW_VERSION "</p>"
         "<form method='POST' action='/update' enctype='multipart/form-data'>"
         "<label for='fw'>Seleccion\xc3\xa1 el archivo <strong>firmware.bin</strong>:</label>"
@@ -946,7 +1010,7 @@ void Net::_handleOtaPost() {
         "<!DOCTYPE html><html lang='es'>"
         "<head><meta charset='UTF-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>espToy \xe2\x80\x94 OTA</title>"
+        "<title>Ramoncito \xe2\x80\x94 OTA</title>"
         "<style>"
         "body{background:#121212;color:#e0e0e0;font-family:sans-serif;"
         "display:flex;justify-content:center;align-items:center;min-height:100vh;padding:16px}"
@@ -1006,4 +1070,202 @@ void Net::_handleOtaUpload() {
             Update.printError(Serial);
         }
     }
+}
+
+// ================================================================
+//  lanIP() — IP del toy en la LAN ("" si no conectado)
+// ================================================================
+String Net::lanIP() const {
+    if (WiFi.status() == WL_CONNECTED) return WiFi.localIP().toString();
+    return String();
+}
+
+// ================================================================
+//  Panel web en la LAN
+// ================================================================
+
+// Basic Auth con OTA_USUARIO/OTA_CLAVE. Devuelve false (y ya pidió login)
+// si no está autorizado: el handler debe retornar de inmediato.
+bool Net::_panelAutorizado() {
+    if (!_server->authenticate(OTA_USUARIO, OTA_CLAVE)) {
+        _server->requestAuthentication();
+        return false;
+    }
+    return true;
+}
+
+// GET /panel — dashboard HTML (los datos los trae luego /api/state por fetch)
+void Net::_handlePanel() {
+    if (!_panelAutorizado()) return;
+    _server->send(200, "text/html; charset=utf-8", _htmlPanel());
+}
+
+// GET /api/state — snapshot del estado en JSON (lo refresca main.cpp)
+void Net::_handleApiState() {
+    if (!_panelAutorizado()) return;
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "{\"felicidad\":%u,\"energia\":%u,\"aburrimiento\":%u,"
+        "\"animo\":%u,\"energiaPers\":%u,\"edadDias\":%d,"
+        "\"sonido\":%s,\"hayUpdate\":%s,\"fw\":\"%s\",\"verNueva\":\"%s\","
+        "\"expr\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\"}",
+        _web.felicidad, _web.energia, _web.aburrimiento,
+        _web.animo, _web.energia_pers, _web.edadDias,
+        _web.sonido ? "true" : "false",
+        _web.hayUpdate ? "true" : "false",
+        _web.fwVersion, _web.versionNueva, _web.expresion,
+        _ssid.c_str(), WiFi.localIP().toString().c_str());
+    _server->send(200, "application/json; charset=utf-8", buf);
+}
+
+// GET /api/action?do=... — encola una acción; main.cpp la ejecuta en su loop.
+// Nunca ejecuta aquí (el handler no debe bloquear ni reiniciar en medio).
+void Net::_handleApiAction() {
+    if (!_panelAutorizado()) return;
+    String d = _server->arg("do");
+    const char* msg = "ok";
+    int code = 200;
+
+    if (d == "sonido") {
+        _accionWeb = WebAction::TOGGLE_SONIDO; msg = "sonido cambiado";
+    } else if (d == "ota_check") {
+        _accionWeb = WebAction::OTA_CHECK;     msg = "chequeando actualizacion...";
+    } else if (d == "ota_install") {
+        if (!_web.hayUpdate) { code = 409; msg = "no hay actualizacion disponible"; }
+        else { _accionWeb = WebAction::OTA_INSTALL; msg = "instalando... el toy se reinicia"; }
+    } else if (d == "portal") {
+        _accionWeb = WebAction::ABRIR_PORTAL;  msg = "abri la red Ramoncito-setup en el toy";
+    } else if (d == "renacer") {
+        if (_server->arg("confirm") != "1") { code = 400; msg = "falta confirmacion"; }
+        else { _accionWeb = WebAction::RENACER; msg = "renaciendo... borra todo"; }
+    } else {
+        code = 400; msg = "accion desconocida";
+    }
+
+    char buf[160];
+    snprintf(buf, sizeof(buf), "{\"ok\":%s,\"msg\":\"%s\"}",
+             code == 200 ? "true" : "false", msg);
+    _server->send(code, "application/json; charset=utf-8", buf);
+}
+
+// HTML del dashboard: estático; se hidrata y auto-refresca vía /api/state.
+String Net::_htmlPanel() {
+    return String(R"rawhtml(<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ramoncito</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#121212;color:#e0e0e0;font-family:sans-serif;padding:16px;
+       display:flex;justify-content:center}
+  .wrap{max-width:460px;width:100%}
+  h1{font-size:1.6rem;text-align:center;margin-bottom:2px}
+  .sub{color:#888;font-size:.8rem;text-align:center;margin-bottom:18px}
+  .card{background:#1e1e1e;border-radius:14px;padding:18px 18px 20px;margin-bottom:14px;
+        box-shadow:0 6px 24px rgba(0,0,0,.5)}
+  .card h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:#7a7a7a;margin-bottom:14px}
+  .row{margin-bottom:14px}
+  .row:last-child{margin-bottom:0}
+  .lbl{display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:5px}
+  .lbl .v{color:#9ecbff}
+  .bar{height:9px;background:#2b2b2b;border-radius:6px;overflow:hidden}
+  .fill{height:100%;border-radius:6px;transition:width .4s}
+  .f-fel{background:#f6c85b}.f-ene{background:#5bd07a}.f-abu{background:#b98bff}
+  .bip{position:relative;height:9px;background:#2b2b2b;border-radius:6px}
+  .bip .mk{position:absolute;top:-3px;width:5px;height:15px;border-radius:3px;background:#9ecbff;transition:left .4s}
+  .ends{display:flex;justify-content:space-between;font-size:.72rem;color:#777;margin-top:4px}
+  .meta{display:flex;justify-content:space-between;font-size:.85rem;color:#bbb;margin-top:2px}
+  .meta+.meta{margin-top:8px}
+  .upd{background:#123a20;color:#7fe0a0;border:1px solid #2d6a45;border-radius:8px;
+       padding:9px 11px;font-size:.85rem;margin-top:6px;display:none}
+  .btn{display:block;width:100%;margin-top:10px;padding:12px;border:none;border-radius:10px;
+       font-size:.98rem;font-weight:600;cursor:pointer;background:#2a2a2a;color:#ddd;border:1px solid #3a3a3a}
+  .btn:active{background:#333}
+  .btn.primary{background:#5b9cf6;color:#000;border:none}
+  .btn.danger{background:#3a1a1a;color:#ff8a8a;border:1px solid #6a2d2d}
+  .btn:disabled{opacity:.4;cursor:default}
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+         background:#2a2a2a;color:#fff;padding:10px 16px;border-radius:10px;font-size:.85rem;
+         box-shadow:0 6px 24px rgba(0,0,0,.6);opacity:0;transition:opacity .3s;pointer-events:none}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Ramoncito &#x1F916;</h1>
+  <p class="sub" id="sub">conectado &mdash; cargando&hellip;</p>
+
+  <div class="card">
+    <h2>Estado</h2>
+    <div class="row"><div class="lbl"><span>Felicidad</span><span class="v" id="v-fel">--</span></div>
+      <div class="bar"><div class="fill f-fel" id="b-fel"></div></div></div>
+    <div class="row"><div class="lbl"><span>Energ&iacute;a</span><span class="v" id="v-ene">--</span></div>
+      <div class="bar"><div class="fill f-ene" id="b-ene"></div></div></div>
+    <div class="row"><div class="lbl"><span>Aburrimiento</span><span class="v" id="v-abu">--</span></div>
+      <div class="bar"><div class="fill f-abu" id="b-abu"></div></div></div>
+  </div>
+
+  <div class="card">
+    <h2>Personalidad</h2>
+    <div class="row"><div class="bip"><div class="mk" id="m-animo"></div></div>
+      <div class="ends"><span>gru&ntilde;&oacute;n</span><span>alegre</span></div></div>
+    <div class="row"><div class="bip"><div class="mk" id="m-ener"></div></div>
+      <div class="ends"><span>perezoso</span><span>en&eacute;rgico</span></div></div>
+    <div class="meta"><span>Edad</span><span id="v-edad">--</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Firmware</h2>
+    <div class="meta"><span>Versi&oacute;n</span><span id="v-fw">--</span></div>
+    <div class="upd" id="upd"></div>
+    <button class="btn" onclick="act('ota_check')">Buscar actualizaci&oacute;n</button>
+    <button class="btn primary" id="btn-inst" style="display:none" onclick="act('ota_install','Instalar la nueva versión? El toy se reinicia.')">Instalar actualizaci&oacute;n</button>
+  </div>
+
+  <div class="card">
+    <h2>Ajustes</h2>
+    <button class="btn" id="btn-snd" onclick="act('sonido')">Sonido</button>
+    <button class="btn" onclick="act('portal','Abrir el portal de WiFi en el toy?')">Cambiar WiFi</button>
+    <button class="btn danger" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')">Renacer</button>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+function pct(x){return Math.max(0,Math.min(100,x))+'%';}
+function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
+  clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('show');},2600);}
+async function refresh(){
+  try{
+    var r=await fetch('/api/state');if(!r.ok)return;var s=await r.json();
+    document.getElementById('sub').innerHTML=(s.ssid?('red: '+s.ssid+' &mdash; '):'')+s.ip;
+    document.getElementById('v-fel').textContent=s.felicidad;
+    document.getElementById('v-ene').textContent=s.energia;
+    document.getElementById('v-abu').textContent=s.aburrimiento;
+    document.getElementById('b-fel').style.width=pct(s.felicidad);
+    document.getElementById('b-ene').style.width=pct(s.energia);
+    document.getElementById('b-abu').style.width=pct(s.aburrimiento);
+    document.getElementById('m-animo').style.left='calc('+pct(s.animo)+' - 2px)';
+    document.getElementById('m-ener').style.left='calc('+pct(s.energiaPers)+' - 2px)';
+    document.getElementById('v-edad').textContent=(s.edadDias<0?'recién nacido':s.edadDias+' días');
+    document.getElementById('v-fw').textContent=s.fw;
+    document.getElementById('btn-snd').textContent='Sonido: '+(s.sonido?'ON':'OFF');
+    var upd=document.getElementById('upd'),inst=document.getElementById('btn-inst');
+    if(s.hayUpdate){upd.style.display='block';upd.textContent='Nueva versión '+s.verNueva+' disponible';
+      inst.style.display='block';}
+    else{upd.style.display='none';inst.style.display='none';}
+  }catch(e){}
+}
+async function act(doName,confirmMsg){
+  if(confirmMsg&&!confirm(confirmMsg))return;
+  var q='/api/action?do='+doName+(doName==='renacer'?'&confirm=1':'');
+  try{var r=await fetch(q);var j=await r.json();toast(j.msg);}catch(e){toast('error de red');}
+  setTimeout(refresh,900);
+}
+setInterval(refresh,2000);refresh();
+</script>
+</body>
+</html>)rawhtml");
 }

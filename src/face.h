@@ -3,7 +3,7 @@
 #include <U8g2lib.h>
 
 // =============================================================
-//  face.h — Motor de cara y expresiones para espToy
+//  face.h — Motor de cara y expresiones para Ramoncito
 //  Interfaz pública contra la que main.cpp está escrito.
 //
 //  v3 (doc 06 §2): cada expresión es una animación con fases

@@ -1,4 +1,4 @@
-# espToy — Documento 4: Minijuego Oculto — Pong
+# Ramoncito — Documento 4: Minijuego Oculto — Pong
 
 ## Contexto
 

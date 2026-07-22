@@ -9,10 +9,10 @@
 static const int SCREEN_W  = 128;
 static const int SCREEN_H  = 64;
 
-// Header (y 0-14): izquierda "espToy" + fecha, derecha reloj HH:MM
+// Header (y 0-14): izquierda "Ramoncito" + fecha, derecha reloj HH:MM
 // Los ~48 px de la derecha (x=80..127) son EXCLUSIVOS del reloj.
 static const int RELOJ_ZONA_X = 80;  // el texto de la izquierda nunca pasa de acá
-static const int TITULO_Y     = 5;   // baseline "espToy" (fuente 4x6, línea 1)
+static const int TITULO_Y     = 5;   // baseline "Ramoncito" (fuente 4x6, línea 1)
 static const int FECHA_Y      = 14;  // baseline fecha (fuente 5x8, línea 2)
 static const int HORA_Y       = 12;  // baseline reloj (fuente 9x15B)
 static const int SEP_Y        = 15;  // línea separadora horizontal
@@ -119,13 +119,13 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
     if (pagina == 1) {
         // ── PÁGINA 1: Stats actual (diseño original) ──
 
-        // ── HEADER IZQUIERDA: "espToy" + fecha (dos líneas chicas) ──
+        // ── HEADER IZQUIERDA: "Ramoncito" + fecha (dos líneas chicas) ──
         // La zona x >= RELOJ_ZONA_X es exclusiva del reloj: estos textos
         // son cortos y nunca la alcanzan ("sab 12/07" = 9*5 = 45 px).
         if (d.horaValida) {
-            // Línea 1: "espToy" en 4x6 (descendentes de 'p'/'y' llegan a y=6)
+            // Línea 1: "Ramoncito" en 4x6 (descendentes de 'p'/'y' llegan a y=6)
             u8.setFont(u8g2_font_4x6_tf);
-            u8.drawStr(0, TITULO_Y, "espToy");
+            u8.drawStr(0, TITULO_Y, "Ramoncito");
 
             // Línea 2: fecha "sab 12/07" en 5x8 (top en y=8, no pisa la línea 1)
             u8.setFont(u8g2_font_5x8_tf);
@@ -135,9 +135,9 @@ void menuRender(U8G2 &u8, const MenuData &d, uint8_t pagina) {
                      DIAS_SEMANA[ds], d.dia, d.mes);
             u8.drawStr(0, FECHA_Y, fechaBuf);
         } else {
-            // Sin hora válida: solo "espToy", centrado verticalmente en el header
+            // Sin hora válida: solo "Ramoncito", centrado verticalmente en el header
             u8.setFont(u8g2_font_5x8_tf);
-            u8.drawStr(0, 11, "espToy");
+            u8.drawStr(0, 11, "Ramoncito");
         }
 
         // ── HEADER DERECHA: RELOJ HH:MM ──

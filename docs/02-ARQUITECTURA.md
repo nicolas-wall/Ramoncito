@@ -1,6 +1,6 @@
-# espToy — Documento 2: Arquitectura de Software
+# Ramoncito — Documento 2: Arquitectura de Software
 
-> Documento 2 de la serie de planificación de espToy. Define la estructura del firmware: módulos, responsabilidades, flujo de datos y convenciones. Los detalles de cada subsistema viven en los docs 03 (cara), 04 (Pong) y 01 (hardware).
+> Documento 2 de la serie de planificación de Ramoncito. Define la estructura del firmware: módulos, responsabilidades, flujo de datos y convenciones. Los detalles de cada subsistema viven en los docs 03 (cara), 04 (Pong) y 01 (hardware).
 
 ---
 
@@ -17,7 +17,7 @@
 ## 2. Estructura de archivos (PlatformIO)
 
 ```
-espToy/
+Ramoncito/
 ├── platformio.ini
 ├── docs/                     ← esta serie de documentos
 ├── include/
@@ -170,13 +170,13 @@ Interfaz exacta en doc 04 §7: `enter() / exit() / update() / render() / getResu
 ```cpp
 net.syncTime();                  // WiFi → NTP → configura RTC interno → desconecta WiFi
 bool net.isNight();              // usa hora local del RTC; si nunca sincronizó → false
-net.startConfigPortal();         // AP "espToy-setup" + portal cautivo (ver abajo)
+net.startConfigPortal();         // AP "Ramoncito-setup" + portal cautivo (ver abajo)
 net.setTimeFromClient(epoch);    // hora recibida del navegador del teléfono
 ```
 
 WiFi se desconecta tras sincronizar (ahorro y menos ruido para el touch). Resincronización: una vez por día si está despierto, con reconexión breve. Fallback sin WiFi: nunca es de noche, todo lo demás funciona (doc 05, riesgos).
 
-**Configuración desde el teléfono (portal cautivo)**: si no hay credenciales guardadas o la conexión falla, el toy levanta su propio access point `espToy-setup`. Te conectás desde el teléfono y se abre sola una página servida por el ESP32 donde: (a) elegís tu red WiFi de una lista y ponés la clave — se guarda en NVS, nunca en el código —, y (b) hay un botón "usar la hora de este teléfono": el navegador manda su hora local (JavaScript `Date.now()` + offset de zona) y el RTC queda seteado **sin necesidad de internet ni de router**. Las credenciales en `secrets.h` quedan como default opcional de desarrollo; la fuente primaria es el portal.
+**Configuración desde el teléfono (portal cautivo)**: si no hay credenciales guardadas o la conexión falla, el toy levanta su propio access point `Ramoncito-setup`. Te conectás desde el teléfono y se abre sola una página servida por el ESP32 donde: (a) elegís tu red WiFi de una lista y ponés la clave — se guarda en NVS, nunca en el código —, y (b) hay un botón "usar la hora de este teléfono": el navegador manda su hora local (JavaScript `Date.now()` + offset de zona) y el RTC queda seteado **sin necesidad de internet ni de router**. Las credenciales en `secrets.h` quedan como default opcional de desarrollo; la fuente primaria es el portal.
 
 ---
 

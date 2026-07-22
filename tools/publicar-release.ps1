@@ -1,5 +1,5 @@
 # ============================================================
-#  espToy - publicar-release.ps1
+#  Ramoncito - publicar-release.ps1
 #  Compila el firmware, calcula el MD5, genera version.json
 #  y publica una release en GitHub con ambos archivos.
 #
@@ -63,7 +63,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "ERROR: la release $tag ya existe. Subi la version en config.h y reintentEa." -ForegroundColor Red
     exit 1
 }
-gh release create $tag $binPath $jsonPath --title "espToy $tag" --notes "Release automatica de espToy $version"
+gh release create $tag $binPath $jsonPath --title "Ramoncito $tag" --notes "Release automatica de Ramoncito $version"
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: fallo gh release create." -ForegroundColor Red
     exit 1

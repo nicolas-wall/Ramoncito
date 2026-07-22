@@ -1,5 +1,5 @@
 // =============================================================
-//  imu.cpp — Módulo IMU para espToy (MPU6050 por Wire crudo)
+//  imu.cpp — Módulo IMU para Ramoncito (MPU6050 por Wire crudo)
 //
 //  Registros MPU6050 usados:
 //    0x6B  PWR_MGMT_1   — escribir 0 para despertar del sleep
