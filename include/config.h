@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.12"
+#define FW_VERSION "0.9.13"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO

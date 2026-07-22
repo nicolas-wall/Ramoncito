@@ -79,6 +79,11 @@ static const IPAddress AP_SUBNET           (255, 255, 255, 0);
 //  begin() — llamar desde setup()
 // ================================================================
 void Net::begin() {
+    // Las credenciales las guardamos nosotros en NVS ("ramoncito"); no
+    // necesitamos que el driver WiFi las persista en su flash en cada
+    // WiFi.begin() (los reintentos de reconexión escribirían flash de más).
+    WiFi.persistent(false);
+
     // ---- Modo SOLO-AP (WIFI_INTENTAR_STA == false) -----------------
     // No se intenta conectar a ninguna red: se levanta SOLO el AP de setup,
     // estable y permanente, y la hora llega por /settime desde el teléfono.
@@ -245,6 +250,35 @@ void Net::update(uint32_t now) {
 
         // ---- REPOSO ----------------------------------------------
         case Estado::REPOSO: {
+            // Watchdog de la STA: mientras el panel LAN / auto-OTA necesiten
+            // la conexión viva, vigilar que no se caiga. Si se cae (WiFi
+            // inestable), reintentar y re-anunciar mDNS al volver. Sin esto,
+            // una caída dejaba el panel muerto hasta el resync de 24 h.
+            if ((PANEL_LAN_HABILITADO || OTA_AUTO_HABILITADO) && _ssid.length() > 0) {
+                if (WiFi.status() == WL_CONNECTED) {
+                    if (!_lanServer) {
+                        Serial.printf("[net] STA reconectada — IP %s\n",
+                                      WiFi.localIP().toString().c_str());
+                        _iniciarLanServer();   // re-begin server + re-anuncia mDNS
+                    }
+                } else {
+                    if (_lanServer) {
+                        // Recién se cayó: bajar el anuncio mDNS (la IP puede
+                        // cambiar al volver) y marcar el server como no-activo.
+                        Serial.println("[net] STA caida en reposo — reintentando reconexion");
+                        MDNS.end();
+                        _mdnsIniciado = false;
+                        _lanServer    = false;
+                    }
+                    // Reintento activo cada REINTENTO_STA_MS (además del
+                    // auto-reconnect del supplicant) para forzar la vuelta.
+                    if ((now - _tUltimoReintento) >= REINTENTO_STA_MS) {
+                        _tUltimoReintento = now;
+                        WiFi.begin(_ssid.c_str(), _pass.c_str());
+                    }
+                }
+            }
+
             // Resync diario: si hay credenciales y pasó el tiempo
             if (_ssid.length() > 0 &&
                 _tUltimaSync > 0 &&
@@ -578,6 +612,12 @@ void Net::_registrarRutas() {
 void Net::_iniciarLanServer() {
     if (!PANEL_LAN_HABILITADO) return;
     if (WiFi.status() != WL_CONNECTED) return;
+
+    // Enchufado + panel siempre disponible → priorizar estabilidad sobre
+    // consumo: apagar el modem-sleep (causa cortes/latencia con muchos
+    // routers) y dejar que el supplicant reconecte solo si se cae.
+    WiFi.setSleep(false);
+    WiFi.setAutoReconnect(true);
 
     _registrarRutas();     // no-op si ya existían
     _server->begin();      // reanuda la escucha (ahora sobre la STA)
