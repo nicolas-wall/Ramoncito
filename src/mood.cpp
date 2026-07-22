@@ -15,7 +15,7 @@
 Mood mood;
 
 // ── Namespace y claves NVS ────────────────────────────────────
-static const char* NVS_NS        = "esptoy";
+static const char* NVS_NS        = "ramoncito";
 static const char* NVS_HAPPINESS = "happiness";
 static const char* NVS_ENERGY    = "energy";
 static const char* NVS_BOREDOM   = "boredom";

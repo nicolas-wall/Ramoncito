@@ -128,7 +128,7 @@ Plan de construcción etapa por etapa. Cada etapa es independientemente verifica
 - [x] Implementar decaimiento temporal (verificado en hardware: -2 energía, -1/-2 felicidad, +3 aburrimiento por minuto; TIME_SCALE en config.h para acelerar pruebas)
 - [x] Mapear entradas a modificaciones de humor (A: +10F -5A; B: +15E -10A; caricia: +20F -15A; + efectos de Pong y despertar nocturno ya definidos)
 - [x] `dominantExpression()` según tabla doc 03 §5 (con orden corregido: la condición compuesta ENOJADO se evalúa antes que TRISTE)
-- [x] NVS con `Preferences` (namespace "esptoy")
+- [x] NVS con `Preferences` (namespace "ramoncito")
 - [x] Guardar: timer 5 min con dirty flag + inmediato tras interacciones
 - [x] Guardar `lastEpoch` junto al estado
 - [x] Cargar al boot con defaults 50/80/0 — **verificado: el humor sobrevive al reinicio**

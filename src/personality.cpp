@@ -19,7 +19,7 @@
 Personality personality;
 
 // ── Namespace y claves NVS ────────────────────────────────────
-static const char* PERS_NS      = "esptoy";
+static const char* PERS_NS      = "ramoncito";
 static const char* PERS_ANIMO   = "pAnimo";
 static const char* PERS_ENERGIA = "pEnergia";
 static const char* PERS_BIRTH   = "pBirth";

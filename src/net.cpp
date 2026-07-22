@@ -439,7 +439,7 @@ bool Net::staConnected() const {
 // ================================================================
 void Net::_cargarCredenciales() {
     Preferences prefs;
-    prefs.begin("esptoy", true);  // solo lectura
+    prefs.begin("ramoncito", true);  // solo lectura
     _ssid = prefs.getString("wifi_ssid", "");
     _pass = prefs.getString("wifi_pass", "");
     prefs.end();
@@ -571,7 +571,7 @@ void Net::_registrarRutas() {
 
 // ================================================================
 //  _iniciarLanServer() — mantiene el HTTP escuchando sobre la STA (tu
-//  WiFi de casa) para el panel del teléfono, y publica esptoy.local por
+//  WiFi de casa) para el panel del teléfono, y publica ramoncito.local por
 //  mDNS. Se llama cuando el portal se cierra pero la STA queda viva.
 //  Idempotente: begin()/MDNS.begin() se pueden repetir sin efecto.
 // ================================================================
@@ -855,7 +855,7 @@ void Net::_handleSave() {
 
     // Guardar en NVS
     Preferences prefs;
-    prefs.begin("esptoy", false);  // lectura/escritura
+    prefs.begin("ramoncito", false);  // lectura/escritura
     prefs.putString("wifi_ssid", nuevoSsid);
     prefs.putString("wifi_pass", nuevoPass);
     prefs.end();

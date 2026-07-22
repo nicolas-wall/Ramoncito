@@ -19,7 +19,7 @@
 //  El factor se aplica mediante acumuladores float por eje para
 //  que la fracción no se pierda por redondeo.
 //
-//  Persistencia: NVS namespace "esptoy", claves "pAnimo",
+//  Persistencia: NVS namespace "ramoncito", claves "pAnimo",
 //  "pEnergia", "pBirth" (migra desde las viejas pAlegre/pEnerg).
 // =============================================================
 
