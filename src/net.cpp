@@ -1195,209 +1195,208 @@ String Net::_htmlPanel() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#141026">
+<meta name="theme-color" content="#0e0f12">
 <title>Ramoncito</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-  :root{--card:rgba(255,255,255,.055);--line:rgba(255,255,255,.10);
-        --txt:#f2ede4;--dim:#a99fb5;--acc:#ffb454;--pk:#ff7eb6}
+  :root{--panel:#161719;--panel2:#1d1e21;--line:rgba(255,255,255,.08);
+        --txt:#f4f5f6;--dim:#8b8d93;--gr:#8bef5a;--gr2:#43c93f;--or:#ff9d3d;--or2:#ff7a1a}
   body{min-height:100vh;color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-       padding:22px 16px 46px;display:flex;justify-content:center;
-       background:radial-gradient(120% 80% at 12% -8%,#2a2350 0%,transparent 55%),
-                  radial-gradient(120% 80% at 95% 5%,#4a2340 0%,transparent 52%),#141026}
-  /* ---- Layout responsivo: teléfono = 1 columna; desktop = 2 (horizontal) ---- */
-  .app{width:100%;max-width:460px;display:flex;flex-direction:column;gap:16px}
-  @media(min-width:840px){
-    .app{max-width:940px;display:grid;grid-template-columns:minmax(360px,1fr) minmax(340px,420px);
-         align-items:start;gap:26px}
-    .stage{position:sticky;top:22px}
-    .panels{display:flex;flex-direction:column;gap:16px}
-  }
-  .panels{display:flex;flex-direction:column;gap:16px}
+    display:flex;justify-content:center;align-items:flex-start;padding:24px 18px 40px;
+    background:radial-gradient(120% 120% at 50% 0%,#2c2e33 0%,#141518 45%,#0c0d0f 100%)}
+  .shell{width:100%;max-width:1040px;background:linear-gradient(180deg,#141518,#0f1012);
+    border:1px solid var(--line);border-radius:26px;overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,.6);display:grid;grid-template-columns:66px 1fr;min-height:600px}
 
-  .head{text-align:center;margin-bottom:2px}
-  .name{font-size:1.7rem;font-weight:800;letter-spacing:.01em}
-  .net{font-size:.74rem;color:var(--dim);margin-top:2px}
-  .net b{color:var(--acc);font-weight:700}
+  /* ---- Rail lateral ---- */
+  .rail{background:rgba(0,0,0,.25);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;gap:6px;padding:18px 0}
+  .rail .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gr),var(--gr2));
+    margin-bottom:14px;box-shadow:0 0 16px rgba(139,239,90,.4)}
+  .ri{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    font-size:18px;color:var(--dim);cursor:pointer;transition:.2s;border:1px solid transparent}
+  .ri:hover{color:var(--txt);background:rgba(255,255,255,.05)}
+  .ri.on{color:var(--gr);background:rgba(139,239,90,.1);border-color:rgba(139,239,90,.25)}
+  .rail .sp{flex:1}
+  .rail .me{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#3a3d44,#222);
+    border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:18px}
 
-  /* ---- Escenario del personaje ---- */
-  .stage{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
-    border:1px solid var(--line);border-radius:26px;padding:18px 18px 14px;text-align:center;
-    box-shadow:0 16px 44px rgba(0,0,0,.4)}
-  .crt{width:100%;max-width:340px;margin:0 auto;cursor:pointer;display:block;overflow:visible}
-  .crt .body,.crt .arm,.crt .foot,.crt .horn{transition:transform .3s}
-  #creature{transform-origin:150px 200px;animation:breathe 4.6s ease-in-out infinite}
-  @keyframes breathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-3px) scale(1.012)}}
-  .bounce #creature{animation:bounce .5s ease-in-out infinite}
-  @keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
-  .pet{animation:squish .45s ease}
-  @keyframes squish{0%,100%{transform:scaleY(1) scaleX(1)}40%{transform:scaleY(.9) scaleX(1.08)}}
-  .pupil{transition:transform .5s cubic-bezier(.3,1.2,.5,1)}
-  .lid{transition:transform .12s ease}
-  .brow{transition:transform .3s,opacity .3s}
-  .mouth path,.mouth ellipse{transition:d .3s,opacity .3s}
-  .mood{font-size:1rem;font-weight:700;color:var(--acc);margin-top:4px;min-height:1.3em}
-  .hint{font-size:.72rem;color:var(--dim);margin-top:1px}
+  /* ---- Contenido: 3 columnas ---- */
+  .main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,1fr);
+    gap:20px;padding:26px 30px 30px}
+  .col{min-width:0}
 
-  /* ---- Cards ---- */
-  .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:17px 17px 19px;
-    box-shadow:0 10px 30px rgba(0,0,0,.28)}
-  .card h2{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);margin-bottom:14px}
-  .stat{margin-bottom:14px}
-  .stat:last-child{margin-bottom:0}
-  .slbl{display:flex;justify-content:space-between;align-items:center;font-size:.86rem;margin-bottom:6px}
-  .slbl .ic{margin-right:6px}
-  .chip{font-variant-numeric:tabular-nums;font-weight:700;font-size:.8rem;
-    background:rgba(255,255,255,.09);padding:1px 9px;border-radius:20px}
-  .track{height:11px;background:rgba(255,255,255,.08);border-radius:20px;overflow:hidden}
-  .fill{height:100%;border-radius:20px;width:0;transition:width .7s cubic-bezier(.4,1.3,.5,1)}
-  .f-fel{background:linear-gradient(90deg,#ffd76b,#ff934c)}
-  .f-ene{background:linear-gradient(90deg,#7cf2a6,#25c26b)}
-  .f-abu{background:linear-gradient(90deg,#c9a0ff,#7a5cff)}
+  /* Columna izquierda */
+  .name{font-size:3.1rem;font-weight:800;letter-spacing:-.02em;line-height:.95;margin-bottom:16px;
+    text-transform:uppercase}
+  .badges{display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap}
+  .badge{display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:12px;padding:8px 12px}
+  .badge .bi{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;
+    background:rgba(255,255,255,.05)}
+  .badge .bt{font-size:.62rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
+  .badge .bv{font-size:1rem;font-weight:800}
 
-  .plot{position:relative;width:100%;max-width:250px;aspect-ratio:1/1;margin:2px auto 6px;border-radius:16px;
-    background:linear-gradient(90deg,rgba(255,120,120,.13),transparent 45%,transparent 55%,rgba(120,220,150,.13)),
-      linear-gradient(0deg,rgba(120,150,255,.05),rgba(255,220,120,.10));border:1px solid var(--line)}
-  .plot .grid{position:absolute;inset:0;border-radius:16px;
+  .srow{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+  .tile{width:40px;height:40px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:18px;background:var(--panel2);border:1px solid var(--line)}
+  .sbody{flex:1;min-width:0}
+  .sname{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#cfd1d6;margin-bottom:5px}
+  .seg{display:flex;gap:3px}
+  .seg i{flex:1;height:13px;border-radius:3px;background:rgba(255,255,255,.07);transition:background .4s}
+  .seg i.on{background:linear-gradient(180deg,var(--gr),var(--gr2))}
+  .seg.o i.on{background:linear-gradient(180deg,var(--or),var(--or2))}
+
+  .rankbox{margin-top:24px;background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:14px 15px}
+  .rankbox h3{font-size:.64rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
+  .plot{position:relative;width:100%;aspect-ratio:1.5/1;border-radius:12px;
+    background:linear-gradient(90deg,rgba(255,120,120,.10),transparent 45%,transparent 55%,rgba(139,239,90,.12)),
+      linear-gradient(0deg,rgba(120,150,255,.04),rgba(255,180,60,.08));border:1px solid var(--line)}
+  .plot .grid{position:absolute;inset:0;border-radius:12px;
     background:linear-gradient(var(--line) 1px,transparent 1px) 0 50%/100% 50%,
-               linear-gradient(90deg,var(--line) 1px,transparent 1px) 50% 0/50% 100%}
-  .dot{position:absolute;width:20px;height:20px;border-radius:50%;background:var(--acc);
-    box-shadow:0 0 16px rgba(255,180,84,.9),0 0 4px #fff inset;transform:translate(-50%,50%);transition:left .6s,bottom .6s}
-  .cnr{position:absolute;font-size:.66rem;color:var(--dim);font-weight:600}
-  .cnr.t{top:6px;left:50%;transform:translateX(-50%)}.cnr.b{bottom:6px;left:50%;transform:translateX(-50%)}
-  .cnr.l{left:7px;top:50%;transform:translateY(-50%) rotate(-90deg)}
-  .cnr.r{right:7px;top:50%;transform:translateY(-50%) rotate(90deg)}
-  .meta{display:flex;justify-content:space-between;font-size:.85rem;margin-top:8px}
-  .meta span:first-child{color:var(--dim)}
-  .upd{background:linear-gradient(135deg,rgba(40,194,107,.22),rgba(40,194,107,.08));color:#8bf0b4;
-    border:1px solid rgba(40,194,107,.4);border-radius:12px;padding:10px 12px;font-size:.84rem;margin:2px 0 4px;display:none}
+              linear-gradient(90deg,var(--line) 1px,transparent 1px) 50% 0/50% 100%}
+  .dot{position:absolute;width:16px;height:16px;border-radius:50%;background:var(--gr);
+    box-shadow:0 0 14px rgba(139,239,90,.9),0 0 3px #fff inset;transform:translate(-50%,50%);transition:left .6s,bottom .6s}
+  .cnr{position:absolute;font-size:.58rem;color:var(--dim);font-weight:600}
+  .cnr.t{top:5px;left:50%;transform:translateX(-50%)}.cnr.b{bottom:5px;left:50%;transform:translateX(-50%)}
+  .cnr.l{left:5px;top:50%;transform:translateY(-50%)}.cnr.r{right:5px;top:50%;transform:translateY(-50%)}
 
-  .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;padding:13px;
-    border:1px solid var(--line);border-radius:13px;font-size:.96rem;font-weight:600;cursor:pointer;
-    background:rgba(255,255,255,.06);color:var(--txt);transition:transform .06s,background .2s}
-  .btn:active{transform:scale(.97);background:rgba(255,255,255,.12)}
-  .btn.primary{background:linear-gradient(135deg,#ffb454,#ff8f4c);color:#2a1400;border:none}
-  .btn.danger{background:rgba(255,90,90,.1);color:#ff8a8a;border-color:rgba(255,90,90,.32)}
+  /* Columna central: personaje placeholder */
+  .hero{position:relative;height:100%;min-height:460px;display:flex;flex-direction:column;
+    align-items:center;justify-content:flex-end}
+  .hero .floor{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);width:74%;height:60px;border-radius:50%;
+    background:radial-gradient(ellipse at center,rgba(139,239,90,.28),transparent 70%);filter:blur(6px)}
+  .ph{position:relative;z-index:1;width:70%;max-width:240px;opacity:.85;animation:float 5s ease-in-out infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+  .phtag{position:relative;z-index:1;margin-bottom:8px;font-size:.72rem;color:var(--dim);
+    border:1px dashed var(--line);border-radius:20px;padding:5px 14px;background:rgba(0,0,0,.2)}
+  .moodtag{position:absolute;top:0;left:50%;transform:translateX(-50%);font-size:.9rem;font-weight:700;color:var(--gr)}
+
+  /* Columna derecha */
+  .h2{font-size:1.5rem;font-weight:800;letter-spacing:-.01em;margin-bottom:18px;text-transform:uppercase}
+  .prow{margin-bottom:15px}
+  .pr-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
+  .pr-name{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#cfd1d6}
+  .pr-lvl{font-size:.72rem;color:var(--dim);font-weight:700}
+  .info{border-top:1px solid var(--line);margin-top:18px;padding-top:16px}
+  .irow{display:flex;justify-content:space-between;font-size:.82rem;padding:6px 0}
+  .irow span:first-child{color:var(--dim)}
+  .irow b{font-weight:700}
+  .upd{background:linear-gradient(135deg,rgba(139,239,90,.2),rgba(139,239,90,.05));color:var(--gr);
+    border:1px solid rgba(139,239,90,.35);border-radius:10px;padding:9px 11px;font-size:.8rem;margin:10px 0 2px;display:none}
+  .ctrls{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:16px}
+  .btn{display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;border:1px solid var(--line);
+    border-radius:11px;font-size:.85rem;font-weight:600;cursor:pointer;background:rgba(255,255,255,.05);
+    color:var(--txt);transition:transform .06s,background .2s}
+  .btn:active{transform:scale(.96);background:rgba(255,255,255,.11)}
+  .btn.wide{grid-column:1/-1}
+  .btn.primary{background:linear-gradient(135deg,var(--gr),var(--gr2));color:#0c1f06;border:none}
+  .btn.danger{background:rgba(255,90,90,.1);color:#ff8a8a;border-color:rgba(255,90,90,.3)}
 
   #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);
-    background:rgba(30,22,48,.97);color:#fff;padding:11px 18px;border-radius:12px;font-size:.86rem;
+    background:rgba(20,21,24,.97);color:#fff;padding:11px 18px;border-radius:12px;font-size:.86rem;
     border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.6);opacity:0;transition:all .3s;pointer-events:none}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ---- Responsive: teléfono ---- */
+  @media(max-width:860px){
+    .shell{grid-template-columns:1fr;border-radius:22px}
+    .rail{flex-direction:row;border-right:none;border-bottom:1px solid var(--line);padding:10px 14px;gap:8px}
+    .rail .logo{margin-bottom:0}.rail .sp{flex:1}
+    .main{grid-template-columns:1fr;gap:22px;padding:22px 20px 26px}
+    .name{font-size:2.5rem;text-align:center}
+    .badges{justify-content:center}
+    .col-c{order:-1}
+    .hero{min-height:300px}
+    .h2{text-align:center}
+    .ctrls{grid-template-columns:1fr 1fr}
+  }
 </style>
 </head>
 <body>
-<div class="app">
-  <div class="stage">
-    <div class="head">
-      <div class="name">Ramoncito</div>
-      <div class="net" id="net">conectando&hellip;</div>
-    </div>
-    <svg class="crt" id="crt" viewBox="0 0 300 300" onclick="petear()">
-      <defs>
-        <filter id="fur" x="-25%" y="-25%" width="150%" height="150%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.14 0.16" numOctaves="2" seed="6" result="n"/>
-          <feDisplacementMap in="SourceGraphic" in2="n" scale="15" xChannelSelector="R" yChannelSelector="G"/>
-        </filter>
-        <radialGradient id="gbody" cx="42%" cy="32%" r="78%">
-          <stop offset="0%" stop-color="#8f7bd6"/><stop offset="55%" stop-color="#6f5ac0"/>
-          <stop offset="100%" stop-color="#4f3d97"/>
-        </radialGradient>
-        <radialGradient id="gbelly" cx="50%" cy="40%" r="70%">
-          <stop offset="0%" stop-color="#fbeede"/><stop offset="100%" stop-color="#e9d3b8"/>
-        </radialGradient>
-      </defs>
-      <g id="creature">
-        <ellipse class="shadow" cx="150" cy="272" rx="86" ry="16" fill="rgba(0,0,0,.28)"/>
-        <!-- pies -->
-        <ellipse class="foot" cx="112" cy="262" rx="26" ry="17" fill="#5b47a6"/>
-        <ellipse class="foot" cx="188" cy="262" rx="26" ry="17" fill="#5b47a6"/>
-        <!-- brazos -->
-        <ellipse class="arm" cx="56" cy="196" rx="20" ry="30" fill="#634fb0" filter="url(#fur)"/>
-        <ellipse class="arm" cx="244" cy="196" rx="20" ry="30" fill="#634fb0" filter="url(#fur)"/>
-        <!-- orejas/cuernitos peludos -->
-        <path class="horn" d="M96 78 Q88 30 118 58 Z" fill="#6f5ac0" filter="url(#fur)"/>
-        <path class="horn" d="M204 78 Q212 30 182 58 Z" fill="#6f5ac0" filter="url(#fur)"/>
-        <!-- cuerpo peludo -->
-        <path class="body" filter="url(#fur)" fill="url(#gbody)"
-          d="M150 56 C104 56 66 96 66 156 C66 226 100 262 150 262 C200 262 234 226 234 156 C234 96 196 56 150 56 Z"/>
-        <!-- panza -->
-        <ellipse cx="150" cy="188" rx="52" ry="58" fill="url(#gbelly)" opacity=".95"/>
-        <!-- mejillas -->
-        <ellipse class="cheek" cx="96" cy="176" rx="15" ry="10" fill="#ff9ec4" opacity=".55"/>
-        <ellipse class="cheek" cx="204" cy="176" rx="15" ry="10" fill="#ff9ec4" opacity=".55"/>
-        <!-- cejas -->
-        <g class="brows">
-          <rect class="brow bl" x="86" y="104" width="42" height="9" rx="4" fill="#3f3080" opacity="0"/>
-          <rect class="brow br" x="172" y="104" width="42" height="9" rx="4" fill="#3f3080" opacity="0"/>
-        </g>
-        <!-- ojos -->
-        <g class="eyes">
-          <g class="eye" transform="translate(108 140)">
-            <ellipse class="white" cx="0" cy="0" rx="26" ry="28" fill="#fffdf7"/>
-            <circle class="pupil pl" cx="0" cy="2" r="12" fill="#241a3a"/>
-            <circle cx="-4" cy="-3" r="4" fill="#fff"/>
-            <rect class="lid ll" x="-30" y="-34" width="60" height="34" rx="6" fill="#6f5ac0" transform="translate(0 -34)"/>
-          </g>
-          <g class="eye" transform="translate(192 140)">
-            <ellipse class="white" cx="0" cy="0" rx="26" ry="28" fill="#fffdf7"/>
-            <circle class="pupil pr" cx="0" cy="2" r="12" fill="#241a3a"/>
-            <circle cx="-4" cy="-3" r="4" fill="#fff"/>
-            <rect class="lid lr" x="-30" y="-34" width="60" height="34" rx="6" fill="#6f5ac0" transform="translate(0 -34)"/>
-          </g>
-        </g>
-        <!-- corazones (enamorado) -->
-        <g class="hearts" opacity="0">
-          <text x="108" y="152" font-size="34" text-anchor="middle" fill="#ff7eb6">&#10084;</text>
-          <text x="192" y="152" font-size="34" text-anchor="middle" fill="#ff7eb6">&#10084;</text>
-        </g>
-        <!-- boca -->
-        <g class="mouth" fill="none" stroke="#3f3080" stroke-width="6" stroke-linecap="round">
-          <path class="m-line" d="M132 206 Q150 218 168 206"/>
-          <ellipse class="m-open" cx="150" cy="210" rx="15" ry="13" fill="#7a2f4a" stroke="none" opacity="0"/>
-        </g>
-        <!-- Zzz (dormido) -->
-        <g class="zzz" opacity="0"><text x="228" y="120" font-size="26" fill="#cdbff5" font-weight="800">z&#8202;Z</text></g>
-      </g>
-    </svg>
-    <div class="mood" id="mood">&nbsp;</div>
-    <div class="hint">toc&aacute;me &#128075;</div>
+<div class="shell">
+  <div class="rail">
+    <div class="logo"></div>
+    <div class="ri on" title="Inicio">&#9632;</div>
+    <div class="ri" title="Stats">&#9650;</div>
+    <div class="ri" title="Energia">&#9889;</div>
+    <div class="ri" title="Personalidad">&#9670;</div>
+    <div class="ri" title="Logros">&#9733;</div>
+    <div class="sp"></div>
+    <div class="me">&#129418;</div>
   </div>
 
-  <div class="panels">
-    <div class="card">
-      <h2>Estado de &aacute;nimo</h2>
-      <div class="stat"><div class="slbl"><span><span class="ic">&#9728;&#65039;</span>Felicidad</span><span class="chip" id="v-fel">--</span></div>
-        <div class="track"><div class="fill f-fel" id="b-fel"></div></div></div>
-      <div class="stat"><div class="slbl"><span><span class="ic">&#9889;</span>Energ&iacute;a</span><span class="chip" id="v-ene">--</span></div>
-        <div class="track"><div class="fill f-ene" id="b-ene"></div></div></div>
-      <div class="stat"><div class="slbl"><span><span class="ic">&#128564;</span>Aburrimiento</span><span class="chip" id="v-abu">--</span></div>
-        <div class="track"><div class="fill f-abu" id="b-abu"></div></div></div>
-    </div>
-
-    <div class="card">
-      <h2>Personalidad</h2>
-      <div class="plot">
-        <div class="grid"></div>
-        <span class="cnr t">en&eacute;rgico</span><span class="cnr b">perezoso</span>
-        <span class="cnr l">gru&ntilde;&oacute;n</span><span class="cnr r">alegre</span>
-        <div class="dot" id="dot" style="left:50%;bottom:50%"></div>
+  <div class="main">
+    <!-- IZQUIERDA -->
+    <div class="col col-l">
+      <div class="name">Ramoncito</div>
+      <div class="badges">
+        <div class="badge"><div class="bi">&#127874;</div><div><div class="bt">Edad</div><div class="bv" id="v-edad">--</div></div></div>
+        <div class="badge"><div class="bi">&#128218;</div><div><div class="bt">Versi&oacute;n</div><div class="bv" id="v-fw">--</div></div></div>
       </div>
-      <div class="meta"><span>Edad</span><span id="v-edad">--</span></div>
+
+      <div class="srow"><div class="tile">&#9728;&#65039;</div><div class="sbody">
+        <div class="sname">Felicidad</div><div class="seg" id="s-fel"></div></div></div>
+      <div class="srow"><div class="tile">&#9889;</div><div class="sbody">
+        <div class="sname">Energ&iacute;a</div><div class="seg" id="s-ene"></div></div></div>
+      <div class="srow"><div class="tile">&#128564;</div><div class="sbody">
+        <div class="sname">Aburrimiento</div><div class="seg o" id="s-abu"></div></div></div>
+
+      <div class="rankbox">
+        <h3>Mapa de personalidad</h3>
+        <div class="plot">
+          <div class="grid"></div>
+          <span class="cnr t">en&eacute;rgico</span><span class="cnr b">perezoso</span>
+          <span class="cnr l">gru&ntilde;.</span><span class="cnr r">alegre</span>
+          <div class="dot" id="dot" style="left:50%;bottom:50%"></div>
+        </div>
+      </div>
     </div>
 
-    <div class="card">
-      <h2>Firmware</h2>
-      <div class="meta"><span>Versi&oacute;n</span><span id="v-fw">--</span></div>
+    <!-- CENTRO: placeholder del personaje -->
+    <div class="col col-c">
+      <div class="hero">
+        <div class="moodtag" id="mood">&nbsp;</div>
+        <div class="floor"></div>
+        <svg class="ph" viewBox="0 0 200 320">
+          <defs><linearGradient id="gp" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#40444d"/><stop offset="100%" stop-color="#23262c"/></linearGradient></defs>
+          <ellipse cx="100" cy="150" rx="62" ry="72" fill="url(#gp)"/>
+          <circle cx="100" cy="66" r="46" fill="url(#gp)"/>
+          <ellipse cx="52" cy="150" rx="16" ry="40" fill="url(#gp)"/>
+          <ellipse cx="148" cy="150" rx="16" ry="40" fill="url(#gp)"/>
+          <ellipse cx="80" cy="238" rx="18" ry="46" fill="url(#gp)"/>
+          <ellipse cx="120" cy="238" rx="18" ry="46" fill="url(#gp)"/>
+          <circle cx="84" cy="64" r="7" fill="#8b8d93"/><circle cx="116" cy="64" r="7" fill="#8b8d93"/>
+          <text x="100" y="160" font-size="40" text-anchor="middle" fill="#5a5d64" font-weight="800">?</text>
+        </svg>
+        <div class="phtag">personaje pr&oacute;ximamente</div>
+      </div>
+    </div>
+
+    <!-- DERECHA -->
+    <div class="col col-r">
+      <div class="h2">Progreso</div>
+      <div class="prow"><div class="pr-top"><span class="pr-name">&Aacute;nimo</span><span class="pr-lvl" id="l-animo">--</span></div>
+        <div class="seg" id="s-animo"></div></div>
+      <div class="prow"><div class="pr-top"><span class="pr-name">Energ&iacute;a vital</span><span class="pr-lvl" id="l-ener">--</span></div>
+        <div class="seg" id="s-ener"></div></div>
+
+      <div class="info">
+        <div class="irow"><span>Red</span><b id="i-ssid">--</b></div>
+        <div class="irow"><span>Direcci&oacute;n</span><b id="i-ip">--</b></div>
+        <div class="irow"><span>Sonido</span><b id="i-snd">--</b></div>
+        <div class="irow"><span>Estado</span><b id="i-mood">--</b></div>
+      </div>
+
       <div class="upd" id="upd"></div>
-      <button class="btn" onclick="act('ota_check')"><span>&#128260;</span>Buscar actualizaci&oacute;n</button>
-      <button class="btn primary" id="btn-inst" style="display:none" onclick="act('ota_install','Instalar la nueva versión? El toy se reinicia.')"><span>&#11015;&#65039;</span>Instalar actualizaci&oacute;n</button>
-    </div>
-
-    <div class="card">
-      <h2>Ajustes</h2>
-      <button class="btn" id="btn-snd" onclick="act('sonido')"><span>&#128266;</span>Sonido</button>
-      <button class="btn" onclick="act('portal','Abrir el portal de WiFi en el toy?')"><span>&#128246;</span>Cambiar WiFi</button>
-      <button class="btn danger" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')"><span>&#128293;</span>Renacer</button>
+      <div class="ctrls">
+        <button class="btn" id="btn-snd" onclick="act('sonido')">&#128266; Sonido</button>
+        <button class="btn" onclick="act('portal','Abrir el portal de WiFi en el toy?')">&#128246; WiFi</button>
+        <button class="btn" onclick="act('ota_check')">&#128260; Buscar</button>
+        <button class="btn danger" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')">&#128293; Renacer</button>
+        <button class="btn primary wide" id="btn-inst" style="display:none" onclick="act('ota_install','Instalar la nueva versión? El toy se reinicia.')">&#11015;&#65039; Instalar actualizaci&oacute;n</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1407,95 +1406,36 @@ String Net::_htmlPanel() {
 var MOODS={tranquilo:"Tranquilo",neutral:"Tranquilo",feliz:"Feliz",riendo:"Se ríe",triste:"Triste",
   enojado:"Enojado",sorprendido:"Sorprendido",aburrido:"Aburrido",dormido:"Durmiendo",
   sospechoso:"Desconfiado",enamorado:"Enamorado",mareado:"Mareado",ilusionado:"Ilusionado"};
-var C=document.getElementById('crt'), CR=document.getElementById('creature');
-var pl=C.querySelector('.pl'), pr=C.querySelector('.pr');
-var ll=C.querySelector('.ll'), lr=C.querySelector('.lr');
-var bl=C.querySelector('.bl'), br=C.querySelector('.br');
-var mline=C.querySelector('.m-line'), mopen=C.querySelector('.m-open');
-var hearts=C.querySelector('.hearts'), zzz=C.querySelector('.zzz'), cheeks=C.querySelectorAll('.cheek');
-var expr='tranquilo', petting=false;
-
-function eyesOpen(o){ // o=0 abierto .. 1 cerrado
-  var y=-34+o*34; ll.setAttribute('transform','translate(0 '+y+')'); lr.setAttribute('transform','translate(0 '+y+')');
-}
-function look(dx,dy){
-  pl.style.transform='translate('+dx+'px,'+dy+'px)';
-  pr.style.transform='translate('+dx+'px,'+dy+'px)';
-}
-function setMouth(kind){ // 'smile','big','frown','flat','o'
-  mopen.style.opacity=(kind==='big'||kind==='o')?1:0;
-  var d={smile:'M132 206 Q150 220 168 206',frown:'M132 214 Q150 200 168 214',
-         flat:'M134 210 L166 210',big:'M132 206 Q150 208 168 206',o:'M140 208 Q150 210 160 208'}[kind]||'M132 206 Q150 216 168 206';
-  mline.setAttribute('d',d);
-  if(kind==='o'){mopen.setAttribute('rx',9);mopen.setAttribute('ry',9);}else{mopen.setAttribute('rx',15);mopen.setAttribute('ry',13);}
-}
-function brows(on,ang){
-  bl.style.opacity=on?1:0; br.style.opacity=on?1:0;
-  bl.style.transform=on?('rotate('+ang+'deg)'):''; br.style.transform=on?('rotate('+(-ang)+'deg)'):'';
-  bl.style.transformOrigin='107px 108px'; br.style.transformOrigin='193px 108px';
-}
-// aplica la expresión al personaje
-function applyExpr(e){
-  expr=e; CR.parentElement.classList.remove('bounce');
-  hearts.style.opacity=0; zzz.style.opacity=0; brows(false,0); eyesOpen(0);
-  cheeks.forEach(function(c){c.style.opacity=.55;});
-  var pf=C.querySelectorAll('.pupil'); pf.forEach(function(p){p.style.opacity=1;});
-  if(e==='feliz'){setMouth('smile');cheeks.forEach(function(c){c.style.opacity=.85;});}
-  else if(e==='riendo'){setMouth('big');CR.parentElement.classList.add('bounce');cheeks.forEach(function(c){c.style.opacity=.85;});}
-  else if(e==='triste'){setMouth('frown');look(0,4);}
-  else if(e==='enojado'){setMouth('frown');brows(true,18);}
-  else if(e==='sorprendido'){setMouth('o');}
-  else if(e==='aburrido'){setMouth('flat');eyesOpen(.5);}
-  else if(e==='dormido'){setMouth('flat');eyesOpen(1);zzz.style.opacity=1;}
-  else if(e==='sospechoso'){setMouth('flat');eyesOpen(.35);look(6,0);}
-  else if(e==='enamorado'){setMouth('smile');hearts.style.opacity=1;pf.forEach(function(p){p.style.opacity=0;});cheeks.forEach(function(c){c.style.opacity=.9;});}
-  else if(e==='mareado'){setMouth('o');}
-  else if(e==='ilusionado'){setMouth('big');}
-  else {setMouth('smile');} // tranquilo/neutral
-}
-// vida en reposo: parpadeos y mirada errante (salvo dormido/enamorado)
-function alive(){
-  var quiet=(expr!=='dormido'&&expr!=='enamorado'&&expr!=='mareado');
-  if(expr==='dormido'){ // duerme pero cada tanto espía un ojo
-    if(Math.random()<.25){eyesOpen(.6);setTimeout(function(){if(expr==='dormido')eyesOpen(1);},700);}
-  } else if(quiet){
-    eyesOpen(1);setTimeout(function(){eyesOpen(expr==='aburrido'?.5:(expr==='sospechoso'?.35:0));},130); // parpadeo
-    if(Math.random()<.6){var dx=(Math.random()*16-8),dy=(Math.random()*8-3);look(dx,dy);
-      setTimeout(function(){if(!petting)look(0,expr==='triste'?4:0);},1300);}
-  }
-  setTimeout(alive, 2200+Math.random()*3200);
-}
-// reacción al tocarlo/click
-function petear(){
-  petting=true; CR.classList.remove('pet'); void CR.offsetWidth; CR.classList.add('pet');
-  var prev=expr; applyExpr('enamorado'); toast('🥰');
-  setTimeout(function(){petting=false;applyExpr(prev);},1400);
-}
-
+var N=14;
+function seg(id,val){var el=document.getElementById(id);if(!el)return;
+  if(!el._b){for(var i=0;i<N;i++)el.appendChild(document.createElement('i'));el._b=1;}
+  var k=Math.round(Math.max(0,Math.min(100,val))/100*N),c=el.children;
+  for(var i=0;i<N;i++)c[i].className=(i<k?'on':'');}
+function lvl(v){return 'LVL '+(1+Math.round(Math.max(0,Math.min(100,v))/100*14));}
 function pct(x){return Math.max(0,Math.min(100,x))+'%';}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
   clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('show');},2600);}
 async function refresh(){
   try{
     var r=await fetch('/api/state');if(!r.ok)return;var s=await r.json();
-    document.getElementById('net').innerHTML=(s.ssid?(s.ssid+' &middot; '):'')+'<b>'+s.ip+'</b>';
     var e=(s.expr||'tranquilo');
-    if(!petting && e!==expr) applyExpr(e);
     document.getElementById('mood').textContent=MOODS[e]||'Tranquilo';
-    document.getElementById('v-fel').textContent=s.felicidad;
-    document.getElementById('v-ene').textContent=s.energia;
-    document.getElementById('v-abu').textContent=s.aburrimiento;
-    document.getElementById('b-fel').style.width=pct(s.felicidad);
-    document.getElementById('b-ene').style.width=pct(s.energia);
-    document.getElementById('b-abu').style.width=pct(s.aburrimiento);
-    var dot=document.getElementById('dot');dot.style.left=pct(s.animo);dot.style.bottom=pct(s.energiaPers);
-    document.getElementById('v-edad').textContent=(s.edadDias<0?'recién nacido':s.edadDias+' días');
+    document.getElementById('i-mood').textContent=MOODS[e]||'Tranquilo';
+    document.getElementById('v-edad').textContent=(s.edadDias<0?'0 d':s.edadDias+' d');
     document.getElementById('v-fw').textContent='v'+s.fw;
-    document.getElementById('btn-snd').innerHTML='<span>'+(s.sonido?'🔊':'🔇')+'</span>Sonido: '+(s.sonido?'ON':'OFF');
+    seg('s-fel',s.felicidad);seg('s-ene',s.energia);seg('s-abu',s.aburrimiento);
+    seg('s-animo',s.animo);seg('s-ener',s.energiaPers);
+    document.getElementById('l-animo').textContent=lvl(s.animo);
+    document.getElementById('l-ener').textContent=lvl(s.energiaPers);
+    var dot=document.getElementById('dot');dot.style.left=pct(s.animo);dot.style.bottom=pct(s.energiaPers);
+    document.getElementById('i-ssid').textContent=s.ssid||'--';
+    document.getElementById('i-ip').textContent=s.ip||'--';
+    document.getElementById('i-snd').textContent=s.sonido?'ON':'OFF';
+    document.getElementById('btn-snd').innerHTML=(s.sonido?'🔊':'🔇')+' Sonido';
     var upd=document.getElementById('upd'),inst=document.getElementById('btn-inst');
     if(s.hayUpdate){upd.style.display='block';upd.textContent='✨ Nueva versión '+s.verNueva+' disponible';inst.style.display='flex';}
     else{upd.style.display='none';inst.style.display='none';}
-  }catch(e){}
+  }catch(err){}
 }
 async function act(doName,confirmMsg){
   if(confirmMsg&&!confirm(confirmMsg))return;
@@ -1503,7 +1443,7 @@ async function act(doName,confirmMsg){
   try{var r=await fetch(q);var j=await r.json();toast(j.msg);}catch(e){toast('error de red');}
   setTimeout(refresh,900);
 }
-applyExpr('tranquilo'); alive(); setInterval(refresh,2000); refresh();
+setInterval(refresh,2000);refresh();
 </script>
 </body>
 </html>)rawhtml");
