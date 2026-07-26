@@ -1227,231 +1227,131 @@ void Net::_handleApiNotify() {
     _server->send(200, "application/json; charset=utf-8", "{\"ok\":true}");
 }
 
-// HTML del dashboard: estático; se hidrata y auto-refresca vía /api/state.
+// HTML del dashboard: estilo "character creator" dibujado a mano (cutekart).
 String Net::_htmlPanel() {
     return String(R"rawhtml(<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0e0f12">
+<meta name="theme-color" content="#e9dcc0">
 <title>Ramoncito</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-  :root{--panel:#161719;--panel2:#1d1e21;--line:rgba(255,255,255,.08);
-        --txt:#f4f5f6;--dim:#8b8d93;--gr:#8bef5a;--gr2:#43c93f;--or:#ff9d3d;--or2:#ff7a1a}
-  body{min-height:100vh;color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    display:flex;justify-content:center;align-items:flex-start;padding:24px 18px 40px;
-    background:radial-gradient(120% 120% at 50% 0%,#2c2e33 0%,#141518 45%,#0c0d0f 100%)}
-  .shell{width:100%;max-width:1040px;background:linear-gradient(180deg,#141518,#0f1012);
-    border:1px solid var(--line);border-radius:26px;overflow:hidden;
-    box-shadow:0 30px 80px rgba(0,0,0,.6);display:grid;grid-template-columns:66px 1fr;min-height:600px}
-
-  /* ---- Rail lateral ---- */
-  .rail{background:rgba(0,0,0,.25);border-right:1px solid var(--line);
-    display:flex;flex-direction:column;align-items:center;gap:6px;padding:18px 0}
-  .rail .logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--gr),var(--gr2));
-    margin-bottom:14px;box-shadow:0 0 16px rgba(139,239,90,.4)}
-  .ri{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;
-    font-size:18px;color:var(--dim);cursor:pointer;transition:.2s;border:1px solid transparent}
-  .ri:hover{color:var(--txt);background:rgba(255,255,255,.05)}
-  .ri.on{color:var(--gr);background:rgba(139,239,90,.1);border-color:rgba(139,239,90,.25)}
-  .rail .sp{flex:1}
-  .rail .me{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#3a3d44,#222);
-    border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:18px}
-
-  /* ---- Contenido: 3 columnas ---- */
-  .main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(0,1fr);
-    gap:20px;padding:26px 30px 30px}
+  :root{--paper:#f5ecd6;--paper2:#efe3c6;--ink:#2b2620;--blue:#7d97c4;--orange:#e2a24c;--red:#cf5a41}
+  body{min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:22px 14px 44px;
+    font-family:"Comic Sans MS","Comic Sans","Chalkboard SE","Marker Felt","Segoe Print",cursive;color:var(--ink);
+    background:#cfc7b6;background-image:radial-gradient(circle at 28% 18%,#dad3c3,transparent 60%),
+      radial-gradient(circle at 82% 72%,#c5bca9,transparent 55%)}
+  .win{width:100%;max-width:540px;background:var(--paper);
+    border:3px solid var(--ink);border-radius:14px 10px 16px 9px/9px 16px 10px 14px;
+    box-shadow:6px 8px 0 rgba(0,0,0,.18);overflow:hidden}
+  .tbar{display:flex;align-items:center;gap:8px;border-bottom:3px solid var(--ink);padding:7px 10px;background:var(--paper2)}
+  .url{flex:1;font-size:.72rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wbtn{width:22px;height:20px;border:2.5px solid var(--ink);border-radius:6px 4px 6px 4px/4px 6px 4px 6px;
+    display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:800;background:var(--paper);cursor:pointer}
+  .body{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px}
   .col{min-width:0}
-
-  /* Columna izquierda */
-  .name{font-size:3.1rem;font-weight:800;letter-spacing:-.02em;line-height:.95;margin-bottom:16px;
-    text-transform:uppercase}
-  .badges{display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap}
-  .badge{display:flex;align-items:center;gap:9px;background:var(--panel2);border:1px solid var(--line);
-    border-radius:12px;padding:8px 12px}
-  .badge .bi{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;
-    background:rgba(255,255,255,.05)}
-  .badge .bt{font-size:.62rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
-  .badge .bv{font-size:1rem;font-weight:800}
-
-  .srow{display:flex;align-items:center;gap:12px;margin-bottom:16px}
-  .tile{width:40px;height:40px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
-    font-size:18px;background:var(--panel2);border:1px solid var(--line)}
-  .sbody{flex:1;min-width:0}
-  .sname{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#cfd1d6;margin-bottom:5px}
-  .seg{display:flex;gap:3px}
-  .seg i{flex:1;height:13px;border-radius:3px;background:rgba(255,255,255,.07);transition:background .4s}
-  .seg i.on{background:linear-gradient(180deg,var(--gr),var(--gr2))}
-  .seg.o i.on{background:linear-gradient(180deg,var(--or),var(--or2))}
-
-  .rankbox{margin-top:24px;background:var(--panel2);border:1px solid var(--line);border-radius:16px;padding:14px 15px}
-  .rankbox h3{font-size:.64rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}
-  .plot{position:relative;width:100%;aspect-ratio:1.5/1;border-radius:12px;
-    background:linear-gradient(90deg,rgba(255,120,120,.10),transparent 45%,transparent 55%,rgba(139,239,90,.12)),
-      linear-gradient(0deg,rgba(120,150,255,.04),rgba(255,180,60,.08));border:1px solid var(--line)}
-  .plot .grid{position:absolute;inset:0;border-radius:12px;
-    background:linear-gradient(var(--line) 1px,transparent 1px) 0 50%/100% 50%,
-              linear-gradient(90deg,var(--line) 1px,transparent 1px) 50% 0/50% 100%}
-  .dot{position:absolute;width:16px;height:16px;border-radius:50%;background:var(--gr);
-    box-shadow:0 0 14px rgba(139,239,90,.9),0 0 3px #fff inset;transform:translate(-50%,50%);transition:left .6s,bottom .6s}
-  .cnr{position:absolute;font-size:.58rem;color:var(--dim);font-weight:600}
-  .cnr.t{top:5px;left:50%;transform:translateX(-50%)}.cnr.b{bottom:5px;left:50%;transform:translateX(-50%)}
-  .cnr.l{left:5px;top:50%;transform:translateY(-50%)}.cnr.r{right:5px;top:50%;transform:translateY(-50%)}
-
-  /* Columna central: personaje placeholder */
-  .hero{position:relative;height:100%;min-height:460px;display:flex;flex-direction:column;
-    align-items:center;justify-content:flex-end}
-  .hero .floor{position:absolute;bottom:34px;left:50%;transform:translateX(-50%);width:74%;height:60px;border-radius:50%;
-    background:radial-gradient(ellipse at center,rgba(139,239,90,.28),transparent 70%);filter:blur(6px)}
-  .ph{position:relative;z-index:1;width:70%;max-width:240px;opacity:.85;animation:float 5s ease-in-out infinite}
-  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
-  .phtag{position:relative;z-index:1;margin-bottom:8px;font-size:.72rem;color:var(--dim);
-    border:1px dashed var(--line);border-radius:20px;padding:5px 14px;background:rgba(0,0,0,.2)}
-  .moodtag{position:absolute;top:0;left:50%;transform:translateX(-50%);font-size:.9rem;font-weight:700;color:var(--gr)}
-
-  /* Columna derecha */
-  .h2{font-size:1.5rem;font-weight:800;letter-spacing:-.01em;margin-bottom:18px;text-transform:uppercase}
-  .prow{margin-bottom:15px}
-  .pr-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
-  .pr-name{font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#cfd1d6}
-  .pr-lvl{font-size:.72rem;color:var(--dim);font-weight:700}
-  .info{border-top:1px solid var(--line);margin-top:18px;padding-top:16px}
-  .irow{display:flex;justify-content:space-between;font-size:.82rem;padding:6px 0}
-  .irow span:first-child{color:var(--dim)}
-  .irow b{font-weight:700}
-  .upd{background:linear-gradient(135deg,rgba(139,239,90,.2),rgba(139,239,90,.05));color:var(--gr);
-    border:1px solid rgba(139,239,90,.35);border-radius:10px;padding:9px 11px;font-size:.8rem;margin:10px 0 2px;display:none}
-  .ctrls{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:16px}
-  .btn{display:flex;align-items:center;justify-content:center;gap:7px;padding:11px;border:1px solid var(--line);
-    border-radius:11px;font-size:.85rem;font-weight:600;cursor:pointer;background:rgba(255,255,255,.05);
-    color:var(--txt);transition:transform .06s,background .2s}
-  .btn:active{transform:scale(.96);background:rgba(255,255,255,.11)}
-  .btn.wide{grid-column:1/-1}
-  .btn.primary{background:linear-gradient(135deg,var(--gr),var(--gr2));color:#0c1f06;border:none}
-  .btn.danger{background:rgba(255,90,90,.1);color:#ff8a8a;border-color:rgba(255,90,90,.3)}
-
-  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(10px);
-    background:rgba(20,21,24,.97);color:#fff;padding:11px 18px;border-radius:12px;font-size:.86rem;
-    border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.6);opacity:0;transition:all .3s;pointer-events:none}
+  .stat{margin-bottom:11px}
+  .slbl{font-size:.8rem;font-weight:800;letter-spacing:.02em;margin-bottom:4px;text-transform:uppercase}
+  .seg{display:flex;gap:3px;height:19px}
+  .seg i{flex:1;border:2.2px solid var(--ink);border-radius:5px 3px 5px 3px/3px 5px 3px 5px;background:var(--paper)}
+  .seg i.on{background:var(--blue)}
+  .seg.warn i.on{background:var(--orange)}
+  .selcap{font-size:.64rem;font-weight:800;opacity:.6;text-transform:uppercase;margin:9px 0 -2px 2px}
+  .sel{display:flex;align-items:center;gap:8px}
+  .arw{font-size:1rem;font-weight:900;opacity:.45}
+  .selbox{flex:1;text-align:center;border:2.5px solid var(--ink);
+    border-radius:16px 10px 18px 10px/10px 18px 10px 16px;padding:6px 8px;font-weight:800;
+    font-size:.86rem;text-transform:uppercase;background:var(--paper)}
+  .icons{display:flex;gap:9px;margin-top:14px}
+  .ico{width:46px;height:40px;border:2.8px solid var(--ink);border-radius:12px 8px 12px 8px/8px 12px 8px 12px;
+    background:var(--paper);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;position:relative;transition:transform .06s}
+  .ico:active{transform:translateY(2px)}
+  .ico.red{background:#f2c9bf}.ico.warn{background:#f3dcae}
+  .ico .bang{position:absolute;top:-7px;right:-6px;background:var(--red);color:#fff;font-size:.6rem;font-weight:900;
+    width:16px;height:16px;border-radius:50%;border:2px solid var(--ink);display:none;align-items:center;justify-content:center}
+  .frame{border:3px solid var(--ink);border-radius:16px 12px 18px 10px/10px 18px 12px 16px;
+    background:repeating-linear-gradient(0deg,#fbf5e4,#fbf5e4 22px,#f2e8ce 22px,#f2e8ce 24px);
+    min-height:230px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;position:relative}
+  .moodtag{position:absolute;top:8px;left:0;right:0;text-align:center;font-size:.8rem;font-weight:800;opacity:.75}
+  .ph{width:70%;max-width:150px;animation:bob 4.5s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-8px) rotate(1deg)}}
+  .phtag{margin-top:8px;font-size:.72rem;font-weight:800;opacity:.6;border:2px dashed var(--ink);border-radius:20px;padding:3px 12px}
+  .namebar{display:flex;align-items:center;gap:8px;margin-top:12px}
+  .namebox{flex:1;border:2.8px solid var(--ink);border-radius:16px 10px 18px 10px/10px 18px 10px 16px;
+    padding:8px 12px;font-weight:900;font-size:1.05rem;letter-spacing:.03em;text-transform:uppercase;background:var(--paper)}
+  .reload{width:40px;height:40px;border:2.8px solid var(--ink);border-radius:50%;background:var(--paper);
+    cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px}
+  .sys{font-size:.66rem;font-weight:700;opacity:.6;margin-top:9px;text-align:center}
+  .upd{display:none;margin-top:10px;border:2.5px dashed var(--ink);background:#e7f0d8;border-radius:12px;padding:8px 10px;font-size:.76rem;font-weight:700}
+  .upd b{cursor:pointer;text-decoration:underline}
+  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(8px);background:var(--paper);color:var(--ink);
+    border:2.8px solid var(--ink);border-radius:12px 8px 14px 8px/8px 14px 8px 12px;padding:9px 16px;font-size:.82rem;font-weight:800;
+    box-shadow:4px 5px 0 rgba(0,0,0,.2);opacity:0;transition:all .25s;pointer-events:none}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-
-  /* ---- Responsive: teléfono ---- */
-  @media(max-width:860px){
-    .shell{grid-template-columns:1fr;border-radius:22px}
-    .rail{flex-direction:row;border-right:none;border-bottom:1px solid var(--line);padding:10px 14px;gap:8px}
-    .rail .logo{margin-bottom:0}.rail .sp{flex:1}
-    .main{grid-template-columns:1fr;gap:22px;padding:22px 20px 26px}
-    .name{font-size:2.5rem;text-align:center}
-    .badges{justify-content:center}
-    .col-c{order:-1}
-    .hero{min-height:300px}
-    .h2{text-align:center}
-    .ctrls{grid-template-columns:1fr 1fr}
-  }
+  @media(max-width:560px){.body{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
-<div class="shell">
-  <div class="rail">
-    <div class="logo"></div>
-    <div class="ri on" title="Inicio">&#9632;</div>
-    <div class="ri" title="Stats">&#9650;</div>
-    <div class="ri" title="Energia">&#9889;</div>
-    <div class="ri" title="Personalidad">&#9670;</div>
-    <div class="ri" title="Logros">&#9733;</div>
-    <div class="sp"></div>
-    <div class="me">&#129418;</div>
+<div class="win">
+  <div class="tbar">
+    <span class="url" id="url">WWW.RAMONCITO.LOCAL / CHARACTER</span>
+    <span class="wbtn">_</span><span class="wbtn">&#9633;</span><span class="wbtn" onclick="refresh()">&#10005;</span>
   </div>
-
-  <div class="main">
-    <!-- IZQUIERDA -->
-    <div class="col col-l">
-      <div class="name">Ramoncito</div>
-      <div class="badges">
-        <div class="badge"><div class="bi">&#127874;</div><div><div class="bt">Edad</div><div class="bv" id="v-edad">--</div></div></div>
-        <div class="badge"><div class="bi">&#128218;</div><div><div class="bt">Versi&oacute;n</div><div class="bv" id="v-fw">--</div></div></div>
-      </div>
-
-      <div class="srow"><div class="tile">&#9728;&#65039;</div><div class="sbody">
-        <div class="sname">Felicidad</div><div class="seg" id="s-fel"></div></div></div>
-      <div class="srow"><div class="tile">&#9889;</div><div class="sbody">
-        <div class="sname">Energ&iacute;a</div><div class="seg" id="s-ene"></div></div></div>
-      <div class="srow"><div class="tile">&#128564;</div><div class="sbody">
-        <div class="sname">Aburrimiento</div><div class="seg o" id="s-abu"></div></div></div>
-
-      <div class="rankbox">
-        <h3>Mapa de personalidad</h3>
-        <div class="plot">
-          <div class="grid"></div>
-          <span class="cnr t">en&eacute;rgico</span><span class="cnr b">perezoso</span>
-          <span class="cnr l">gru&ntilde;.</span><span class="cnr r">alegre</span>
-          <div class="dot" id="dot" style="left:50%;bottom:50%"></div>
-        </div>
+  <div class="body">
+    <div class="col">
+      <div class="stat"><div class="slbl">Felicidad</div><div class="seg" id="s-fel"></div></div>
+      <div class="stat"><div class="slbl">Energia</div><div class="seg" id="s-ene"></div></div>
+      <div class="stat"><div class="slbl">Aburrimiento</div><div class="seg warn" id="s-abu"></div></div>
+      <div class="stat"><div class="slbl">Vitalidad</div><div class="seg" id="s-vit"></div></div>
+      <div class="selcap">Humor</div>
+      <div class="sel"><span class="arw">&#9664;</span><div class="selbox" id="sel-mood">--</div><span class="arw">&#9654;</span></div>
+      <div class="selcap">Caracter</div>
+      <div class="sel"><span class="arw">&#9664;</span><div class="selbox" id="sel-car">--</div><span class="arw">&#9654;</span></div>
+      <div class="icons">
+        <div class="ico" id="ico-snd" title="Sonido" onclick="act('sonido')">&#128266;</div>
+        <div class="ico" title="Cambiar WiFi" onclick="act('portal','Abrir el portal de WiFi en el toy?')">&#128246;</div>
+        <div class="ico warn" title="Buscar actualizacion" onclick="act('ota_check')">&#128260;<span class="bang" id="bang">!</span></div>
+        <div class="ico red" title="Renacer" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')">&#128293;</div>
       </div>
     </div>
-
-    <!-- CENTRO: placeholder del personaje -->
-    <div class="col col-c">
-      <div class="hero">
+    <div class="col">
+      <div class="frame">
         <div class="moodtag" id="mood">&nbsp;</div>
-        <div class="floor"></div>
-        <svg class="ph" viewBox="0 0 200 320">
-          <defs><linearGradient id="gp" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#40444d"/><stop offset="100%" stop-color="#23262c"/></linearGradient></defs>
-          <ellipse cx="100" cy="150" rx="62" ry="72" fill="url(#gp)"/>
-          <circle cx="100" cy="66" r="46" fill="url(#gp)"/>
-          <ellipse cx="52" cy="150" rx="16" ry="40" fill="url(#gp)"/>
-          <ellipse cx="148" cy="150" rx="16" ry="40" fill="url(#gp)"/>
-          <ellipse cx="80" cy="238" rx="18" ry="46" fill="url(#gp)"/>
-          <ellipse cx="120" cy="238" rx="18" ry="46" fill="url(#gp)"/>
-          <circle cx="84" cy="64" r="7" fill="#8b8d93"/><circle cx="116" cy="64" r="7" fill="#8b8d93"/>
-          <text x="100" y="160" font-size="40" text-anchor="middle" fill="#5a5d64" font-weight="800">?</text>
+        <svg class="ph" viewBox="0 0 120 150">
+          <g fill="none" stroke="#2b2620" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+            <ellipse cx="42" cy="30" rx="9" ry="20" fill="#f5ecd6"/>
+            <ellipse cx="78" cy="30" rx="9" ry="20" fill="#f5ecd6"/>
+            <circle cx="60" cy="62" r="34" fill="#f5ecd6"/>
+            <circle cx="49" cy="58" r="4" fill="#2b2620"/>
+            <circle cx="71" cy="58" r="4" fill="#2b2620"/>
+            <path d="M57 70 L63 70 L60 75 Z" fill="#2b2620"/>
+            <path d="M40 96 Q60 138 80 96" fill="#f5ecd6"/>
+          </g>
         </svg>
-        <div class="phtag">personaje pr&oacute;ximamente</div>
+        <div class="phtag">personaje proximamente</div>
       </div>
-    </div>
-
-    <!-- DERECHA -->
-    <div class="col col-r">
-      <div class="h2">Progreso</div>
-      <div class="prow"><div class="pr-top"><span class="pr-name">&Aacute;nimo</span><span class="pr-lvl" id="l-animo">--</span></div>
-        <div class="seg" id="s-animo"></div></div>
-      <div class="prow"><div class="pr-top"><span class="pr-name">Energ&iacute;a vital</span><span class="pr-lvl" id="l-ener">--</span></div>
-        <div class="seg" id="s-ener"></div></div>
-
-      <div class="info">
-        <div class="irow"><span>Red</span><b id="i-ssid">--</b></div>
-        <div class="irow"><span>Direcci&oacute;n</span><b id="i-ip">--</b></div>
-        <div class="irow"><span>Sonido</span><b id="i-snd">--</b></div>
-        <div class="irow"><span>Estado</span><b id="i-mood">--</b></div>
+      <div class="namebar">
+        <div class="namebox" id="name">RAMONCITO</div>
+        <div class="reload" title="Actualizar" onclick="refresh()">&#8635;</div>
       </div>
-
+      <div class="sys" id="sys">--</div>
       <div class="upd" id="upd"></div>
-      <div class="ctrls">
-        <button class="btn" id="btn-snd" onclick="act('sonido')">&#128266; Sonido</button>
-        <button class="btn" onclick="act('portal','Abrir el portal de WiFi en el toy?')">&#128246; WiFi</button>
-        <button class="btn" onclick="act('ota_check')">&#128260; Buscar</button>
-        <button class="btn danger" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')">&#128293; Renacer</button>
-        <button class="btn primary wide" id="btn-inst" style="display:none" onclick="act('ota_install','Instalar la nueva versión? El toy se reinicia.')">&#11015;&#65039; Instalar actualizaci&oacute;n</button>
-      </div>
     </div>
   </div>
 </div>
 <div id="toast"></div>
-
 <script>
-var MOODS={tranquilo:"Tranquilo",neutral:"Tranquilo",feliz:"Feliz",riendo:"Se ríe",triste:"Triste",
+var MOODS={tranquilo:"Tranquilo",neutral:"Tranquilo",feliz:"Feliz",riendo:"Se rie",triste:"Triste",
   enojado:"Enojado",sorprendido:"Sorprendido",aburrido:"Aburrido",dormido:"Durmiendo",
   sospechoso:"Desconfiado",enamorado:"Enamorado",mareado:"Mareado",ilusionado:"Ilusionado"};
-var N=14;
+var N=10;
 function seg(id,val){var el=document.getElementById(id);if(!el)return;
   if(!el._b){for(var i=0;i<N;i++)el.appendChild(document.createElement('i'));el._b=1;}
   var k=Math.round(Math.max(0,Math.min(100,val))/100*N),c=el.children;
   for(var i=0;i<N;i++)c[i].className=(i<k?'on':'');}
-function lvl(v){return 'LVL '+(1+Math.round(Math.max(0,Math.min(100,v))/100*14));}
-function pct(x){return Math.max(0,Math.min(100,x))+'%';}
+function carac(v){return v<35?'GRUNON':(v>65?'ALEGRE':'EQUILIBRADO');}
 function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
   clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('show');},2600);}
 async function refresh(){
@@ -1459,21 +1359,17 @@ async function refresh(){
     var r=await fetch('/api/state');if(!r.ok)return;var s=await r.json();
     var e=(s.expr||'tranquilo');
     document.getElementById('mood').textContent=MOODS[e]||'Tranquilo';
-    document.getElementById('i-mood').textContent=MOODS[e]||'Tranquilo';
-    document.getElementById('v-edad').textContent=(s.edadDias<0?'0 d':s.edadDias+' d');
-    document.getElementById('v-fw').textContent='v'+s.fw;
-    seg('s-fel',s.felicidad);seg('s-ene',s.energia);seg('s-abu',s.aburrimiento);
-    seg('s-animo',s.animo);seg('s-ener',s.energiaPers);
-    document.getElementById('l-animo').textContent=lvl(s.animo);
-    document.getElementById('l-ener').textContent=lvl(s.energiaPers);
-    var dot=document.getElementById('dot');dot.style.left=pct(s.animo);dot.style.bottom=pct(s.energiaPers);
-    document.getElementById('i-ssid').textContent=s.ssid||'--';
-    document.getElementById('i-ip').textContent=s.ip||'--';
-    document.getElementById('i-snd').textContent=s.sonido?'ON':'OFF';
-    document.getElementById('btn-snd').innerHTML=(s.sonido?'🔊':'🔇')+' Sonido';
-    var upd=document.getElementById('upd'),inst=document.getElementById('btn-inst');
-    if(s.hayUpdate){upd.style.display='block';upd.textContent='✨ Nueva versión '+s.verNueva+' disponible';inst.style.display='flex';}
-    else{upd.style.display='none';inst.style.display='none';}
+    document.getElementById('sel-mood').textContent=(MOODS[e]||'Tranquilo').toUpperCase();
+    document.getElementById('sel-car').textContent=carac(s.animo);
+    seg('s-fel',s.felicidad);seg('s-ene',s.energia);seg('s-abu',s.aburrimiento);seg('s-vit',s.energiaPers);
+    document.getElementById('url').textContent='WWW.RAMONCITO.LOCAL / '+(s.ip||'CHARACTER');
+    document.getElementById('sys').textContent='v'+s.fw+'  .  '+(s.edadDias<0?'0':s.edadDias)+' DIAS  .  '+(s.ssid||'-');
+    document.getElementById('ico-snd').innerHTML=(s.sonido?'🔊':'🔇');
+    var upd=document.getElementById('upd'),bang=document.getElementById('bang');
+    if(s.hayUpdate){upd.style.display='block';
+      upd.innerHTML='Nueva version v'+s.verNueva+' - <b onclick="act(\'ota_install\',\'Instalar la nueva version? El toy se reinicia.\')">INSTALAR</b>';
+      bang.style.display='flex';}
+    else{upd.style.display='none';bang.style.display='none';}
   }catch(err){}
 }
 async function act(doName,confirmMsg){
@@ -1487,3 +1383,4 @@ setInterval(refresh,2000);refresh();
 </body>
 </html>)rawhtml");
 }
+
