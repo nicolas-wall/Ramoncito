@@ -74,40 +74,45 @@ void Notify::_drawIcono(U8G2 &u8, NotifIcon ic, int x, int y) {
     }
 }
 
-// ----- Render de la tarjeta -----------------------------------
+// ----- Render: globo de diálogo centrado ----------------------
+// Dibuja un bocadillo de cómic (marco redondeado + colita hacia abajo)
+// con el texto centrado adentro. Sin título "Mensaje": parece que el toy
+// lo está diciendo. Si el aviso trae título (webhook), lo muestra chico.
 void Notify::render(U8G2 &u8, const Notif &n, uint32_t ahora, uint32_t mostradaDesde) {
-    // Cabecera: ícono + título
-    _drawIcono(u8, n.icono, 3, 3);
-    u8.setFont(u8g2_font_6x12_tf);
-    // Título recortado a lo que entra a la derecha del ícono (x=24..127)
-    char tit[18];
-    snprintf(tit, sizeof(tit), "%s", n.titulo);
-    u8.drawStr(24, 14, tit);
-    u8.drawHLine(0, 20, 128);
+    // ── Globo ──
+    const int bx = 4, by = 2, bw = 120, bh = 50;   // marco (bottom en y=51)
+    u8.drawRFrame(bx, by, bw, bh, 9);
+    // Colita: triángulo abajo-izquierda, apuntando hacia la "boca"
+    const int tx = 30, ty = by + bh + 8;           // punta de la cola
+    u8.drawLine(23, by + bh - 1, tx, ty);
+    u8.drawLine(39, by + bh - 1, tx, ty);
+    // "Abrir" el borde inferior del globo entre la base de la cola
+    u8.setDrawColor(0);
+    u8.drawHLine(24, by + bh - 1, 15);
+    u8.setDrawColor(1);
 
-    // Cuerpo: word-wrap del texto en líneas de ~24 chars (fuente 5x8)
+    // ── Texto: word-wrap centrado ──
     u8.setFont(u8g2_font_5x8_tf);
-    const int MAXCPL = 24;      // chars por línea
-    const int MAXLIN = 12;      // tope de líneas
+    const int GLYPH = 5;                 // ancho de la fuente 5x8
+    const int MAXCPL = 20;               // ~104 px útiles / 5
+    const int MAXLIN = 10;
     char lineas[MAXLIN][MAXCPL + 1];
     int nlin = 0;
     {
         const char* p = n.texto;
         while (*p && nlin < MAXLIN) {
-            // Saltar espacios iniciales
             while (*p == ' ') p++;
             if (!*p) break;
             int len = 0, corte = 0;
             const char* q = p;
-            // Avanzar hasta MAXCPL, recordando el último espacio para cortar por palabra
             while (q[len] && q[len] != '\n' && len < MAXCPL) {
                 if (q[len] == ' ') corte = len;
                 len++;
             }
             int usar;
-            if (q[len] == '\0' || q[len] == '\n') usar = len;      // entra entero
-            else if (corte > 0)                    usar = corte;    // cortar por palabra
-            else                                   usar = MAXCPL;   // palabra larguísima: cortar duro
+            if (q[len] == '\0' || q[len] == '\n') usar = len;
+            else if (corte > 0)                    usar = corte;
+            else                                   usar = MAXCPL;
             if (usar > MAXCPL) usar = MAXCPL;
             memcpy(lineas[nlin], q, usar);
             lineas[nlin][usar] = '\0';
@@ -117,20 +122,37 @@ void Notify::render(U8G2 &u8, const Notif &n, uint32_t ahora, uint32_t mostradaD
         }
     }
 
-    // Área visible: y=30..62, lineH=9 → 4 líneas. Si hay más, scroll vertical.
-    const int lineH = 9, visibles = 4;
+    // Título opcional (webhook): chico y centrado arriba del texto
+    bool hayTitulo = (n.titulo[0] != '\0');
+    int areaTop = by + (hayTitulo ? 15 : 5);
+    int areaBot = by + bh - 4;
+    if (hayTitulo) {
+        int tw = (int)strlen(n.titulo) * 6;
+        u8.setFont(u8g2_font_6x10_tf);
+        u8.drawStr((128 - tw) / 2, by + 12, n.titulo);
+        u8.setFont(u8g2_font_5x8_tf);
+    }
+
+    // Área visible y scroll vertical si hay muchas líneas
+    const int lineH = 9;
+    int visibles = (areaBot - areaTop) / lineH;
+    if (visibles < 1) visibles = 1;
     int offset = 0;
     if (nlin > visibles) {
-        // Empieza a scrollear a los 2 s, avanza 1 línea cada 1.2 s, se detiene al final
         int32_t t = (int32_t)(ahora - mostradaDesde) - 2000;
         if (t < 0) t = 0;
         offset = t / 1200;
         int maxoff = nlin - visibles;
         if (offset > maxoff) offset = maxoff;
     }
+    int shown = nlin - offset; if (shown > visibles) shown = visibles;
+    int blockH = shown * lineH;
+    int startY = areaTop + ((areaBot - areaTop) - blockH) / 2;
     for (int i = 0; i < visibles; i++) {
         int li = i + offset;
         if (li >= nlin) break;
-        u8.drawStr(2, 30 + i * lineH + 7, lineas[li]);
+        int w = (int)strlen(lineas[li]) * GLYPH;
+        int x = (128 - w) / 2; if (x < bx + 3) x = bx + 3;
+        u8.drawStr(x, startY + i * lineH + 7, lineas[li]);
     }
 }

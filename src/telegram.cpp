@@ -129,7 +129,7 @@ void Telegram::_procesar(const char* texto) {
             resto.trim();
             if (resto.length() == 0) enviar("mandame el texto asi: /mostrar hola!");
             else {
-                notify.push("Mensaje", resto.c_str(), NotifIcon::CHAT);
+                notify.push("", resto.c_str(), NotifIcon::CHAT);  // sin título: globo con solo el texto
                 enviar("listo, lo muestro en mi pantalla 📺");
             }
         }
