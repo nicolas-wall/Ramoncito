@@ -816,12 +816,9 @@ void loop() {
     }
 
     // ── Telegram: mensajes entrantes + comandos ─────────────────
-    // El poll HTTPS bloquea unos cientos de ms: se salta mientras el toy está
-    // "ocupado" (reacción/menú/animación/aviso) para no cortar la animación.
+    // La red de Telegram corre en una tarea de fondo (core 0); acá solo
+    // consumimos lo que dejó (comandos/preguntas/":::"), sin bloquear.
     {
-        bool tgOcupado = (appState == AppState::REACTING || appState == AppState::MENU ||
-                          appState == AppState::NACIENDO || appState == AppState::NOTIF);
-        telegram.update(ahora, tgOcupado);
         switch (telegram.tomarComando()) {
             case Telegram::Cmd::ESTADO: {
                 char m[128];
@@ -850,11 +847,18 @@ void loop() {
                 break;
         }
 
+        // ":::" — mostrar el texto en la pantalla (notify.push lo hace main,
+        // así la cola de avisos la toca un solo hilo).
+        char mbuf[161];
+        if (telegram.tomarMostrar(mbuf, sizeof(mbuf))) {
+            notify.push("", mbuf, NotifIcon::CHAT);
+        }
+
         // Pregunta de texto libre: responder en personaje + poner cara acorde.
-        if (telegram.hayMensaje()) {
+        char qbuf[161];
+        if (telegram.tomarMensaje(qbuf, sizeof(qbuf))) {
             Expression rx = Expression::FELIZ;
-            String resp = responder(telegram.mensaje(), rx);
-            telegram.limpiarMensaje();
+            String resp = responder(qbuf, rx);
             telegram.enviar(resp.c_str());
             // Reacción en la cara (no interrumpe menú/nacimiento; de noche no despierta)
             if (appState == AppState::STANDBY) { u8g2.setPowerSave(0); appState = AppState::IDLE; }
