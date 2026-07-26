@@ -221,6 +221,108 @@ static const char* nombreExpresion(Expression e) {
     }
 }
 
+// ── Respuestas a preguntas por Telegram (local, sin API) ──────
+// Normaliza a minúsculas ASCII sin acentos para poder matchear palabras
+// aunque el usuario escriba con tildes, ñ, ¿, mayúsculas, etc.
+static String normalizar(const char* s) {
+    String o;
+    for (const uint8_t* p = (const uint8_t*)s; *p; ) {
+        uint8_t c = *p;
+        if (c == 0xC3 && p[1]) {          // vocales acentuadas y ñ (UTF-8)
+            uint8_t d = p[1]; p += 2; char m = 0;
+            switch (d) {
+                case 0xA1: case 0x81: m='a'; break;  case 0xA9: case 0x89: m='e'; break;
+                case 0xAD: case 0x8D: m='i'; break;  case 0xB3: case 0x93: m='o'; break;
+                case 0xBA: case 0x9A: m='u'; break;  case 0xB1: case 0x91: m='n'; break;
+            }
+            if (m) o += m; continue;
+        }
+        if (c == 0xC2 && p[1] == 0xBF) { p += 2; continue; }  // ¿
+        if (c >= 0x80) { p++; continue; }                     // otros no-ASCII: descartar
+        if (c >= 'A' && c <= 'Z') c += 32;
+        o += (char)c; p++;
+    }
+    return o;
+}
+static inline bool tiene(const String& n, const char* kw) { return n.indexOf(kw) >= 0; }
+
+// Responde una pregunta en personaje según el estado real. Fija la cara a usar.
+static String responder(const char* q, Expression& rx) {
+    String n = normalizar(q);
+    uint8_t f = mood.happiness(), e = mood.energy(), a = mood.boredom();
+
+    if (tiene(n,"hola")||tiene(n,"buenas")||tiene(n,"buen dia")||tiene(n,"holis")||tiene(n,"ola")) {
+        rx = Expression::FELIZ; return "hola! \xF0\x9F\x90\xB9 que bueno verte";
+    }
+    if (tiene(n,"como estas")||tiene(n,"como andas")||tiene(n,"que tal")||tiene(n,"como te sentis")||tiene(n,"como va")) {
+        if (e < 20) { rx = Expression::DORMIDO;  return "un poco cansado \xF0\x9F\xA5\xB1 (energia "+String(e)+")"; }
+        if (a > 70) { rx = Expression::ABURRIDO; return "medio aburrido... juga conmigo! \xF0\x9F\xA5\xBA"; }
+        if (f > 70) { rx = Expression::FELIZ;    return "de diez! \xF0\x9F\x98\x84 (felicidad "+String(f)+")"; }
+        rx = mood.dominantExpression();          return "ahi ando \xF0\x9F\x90\xB9 feliz "+String(f)+", energia "+String(e);
+    }
+    if (tiene(n,"hambre")||tiene(n,"comer")||tiene(n,"comida")) {
+        if (e < 40) { rx = Expression::ABURRIDO; return "si! me vendria bien recargar energia \xF0\x9F\x8D\xBD"; }
+        rx = Expression::FELIZ; return "estoy bien, gracias \xF0\x9F\x98\x8B";
+    }
+    if (tiene(n,"cansado")||tiene(n,"sueno")||tiene(n,"dormir")||tiene(n,"dormido")) {
+        if (e < 30) { rx = Expression::DORMIDO; return "si, tengo suenito \xF0\x9F\x98\xB4"; }
+        rx = Expression::FELIZ; return "no, estoy piola \xF0\x9F\x98\x8A";
+    }
+    if (tiene(n,"me queres")||tiene(n,"me amas")||tiene(n,"me quieres")||tiene(n,"te caigo")||tiene(n,"me odias")) {
+        rx = Expression::AMOR; return "te re quiero! \xF0\x9F\xA5\xB0";
+    }
+    if (tiene(n,"quien sos")||tiene(n,"que sos")||tiene(n,"como te llamas")||tiene(n,"tu nombre")) {
+        rx = Expression::ILUSIONADO; return "soy Ramoncito, tu mascota \xF0\x9F\x90\xB9";
+    }
+    if (tiene(n,"edad")||tiene(n,"cuantos anos")||tiene(n,"cuanto tenes")||tiene(n,"cumple")) {
+        int d = personality.edadDias(); rx = Expression::FELIZ;
+        if (d < 0) return "recien naci! \xF0\x9F\x90\xA3";
+        return "tengo "+String(d)+" dias \xF0\x9F\x8E\x82";
+    }
+    if (tiene(n,"aburr")) {
+        if (a > 60) { rx = Expression::ABURRIDO; return "si, un poco... haga algo conmigo \xF0\x9F\xA5\xBA"; }
+        rx = Expression::FELIZ; return "para nada, estoy entretenido \xF0\x9F\x98\x84";
+    }
+    if (tiene(n,"enojado")||tiene(n,"enojada")||tiene(n,"bravo")||tiene(n,"enojas")) {
+        bool mh = (malhumorHasta != 0) && ((int32_t)(millis() - malhumorHasta) < 0);
+        if (mh) { rx = Expression::ENOJADO; return "un poco! no me hagas mas cosquillas \xF0\x9F\x98\xA4"; }
+        rx = Expression::FELIZ; return "nono, todo bien \xF0\x9F\x98\x8A";
+    }
+    if (tiene(n,"hora")) {
+        if (net.timeValid()) {
+            struct tm ti;
+            if (getLocalTime(&ti, 10)) {
+                char b[8]; snprintf(b, sizeof(b), "%02d:%02d", ti.tm_hour, ti.tm_min);
+                rx = Expression::FELIZ; return String("son las ")+b+" \xF0\x9F\x95\x90";
+            }
+        }
+        rx = Expression::SOSPECHOSO; return "no se la hora todavia \xF0\x9F\xA4\x94";
+    }
+    if (tiene(n,"chiste")||tiene(n,"reir")||tiene(n,"gracioso")||tiene(n,"contame algo")) {
+        static const char* j[] = {
+            "por que el hamster no usa la compu? le tiene miedo al raton! \xF0\x9F\x90\xADi\xF0\x9F\x98\x86",
+            "que hace un pez? nada! \xF0\x9F\x98\x82",
+            "soy chiquito pero tengo un monton de... RAM \xF0\x9F\x90\xB9" };
+        rx = Expression::RISA; return j[esp_random() % 3];
+    }
+    if (tiene(n,"te gusta")||tiene(n,"que te gusta")||tiene(n,"hobby")) {
+        rx = Expression::AMOR; return "me encantan las caricias y las cosquillas \xF0\x9F\x98\x84";
+    }
+    if (tiene(n,"sonido")||tiene(n,"escuchas")||tiene(n,"mudo")||tiene(n,"volumen")) {
+        rx = Expression::FELIZ; return sound.enabled() ? "el sonido esta prendido \xF0\x9F\x94\x8A"
+                                                       : "estoy en mudo \xF0\x9F\x94\x87";
+    }
+    if (tiene(n,"gracias")) { rx = Expression::AMOR; return "de nada! \xF0\x9F\xA5\xB0"; }
+
+    // Sin match: respuesta variada en personaje
+    static const char* fb[] = {
+        "mmm eso no lo se, pero me caes bien \xF0\x9F\x98\x84",
+        "preguntame otra cosa \xF0\x9F\x90\xB9",
+        "soy un hamster, no se todo eh \xF0\x9F\x98\x85",
+        "\xF0\x9F\xA4\x94 ni idea, pero gracias por hablarme" };
+    rx = Expression::SOSPECHOSO; return fb[esp_random() % 4];
+}
+
 // ------------------------------------------------------------
 static void entrarStandby() {
     randExprActiva     = false;
@@ -746,6 +848,26 @@ void loop() {
             case Telegram::Cmd::NINGUNO:
             default:
                 break;
+        }
+
+        // Pregunta de texto libre: responder en personaje + poner cara acorde.
+        if (telegram.hayMensaje()) {
+            Expression rx = Expression::FELIZ;
+            String resp = responder(telegram.mensaje(), rx);
+            telegram.limpiarMensaje();
+            telegram.enviar(resp.c_str());
+            // Reacción en la cara (no interrumpe menú/nacimiento; de noche no despierta)
+            if (appState == AppState::STANDBY) { u8g2.setPowerSave(0); appState = AppState::IDLE; }
+            if (appState == AppState::IDLE || appState == AppState::REACTING ||
+                appState == AppState::NOTIF) {
+                Melody mel = (rx == Expression::AMOR)    ? Melody::AMOR :
+                             (rx == Expression::RISA)    ? Melody::RISA :
+                             (rx == Expression::ENOJADO) ? Melody::ENOJADO :
+                             (rx == Expression::FELIZ || rx == Expression::ILUSIONADO) ? Melody::FELIZ :
+                             Melody::BIP;
+                sound.play(mel);
+                reaccionar(rx, REACCION_TOUCH_MS, "", ahora);
+            }
         }
 
         // Mensajes proactivos (respetan /callar). El flag se marca solo si el

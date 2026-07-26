@@ -125,19 +125,20 @@ void Telegram::_procesar(const char* texto) {
         else if (cmd == "/hablar") { _silencio = false; enviar("volví! 🐹"); }
         else { // /help /start u otro
             enviar("Soy Ramoncito 🐹\n"
+                   "Haceme una pregunta y te contesto!\n"
+                   "Ej: como estas? tenes hambre? contame un chiste\n\n"
                    "/estado - como me siento\n"
                    "/feliz - ponerme contento\n"
                    "/sonido - mute on/off\n"
                    "/callar - no te escribo\n"
-                   "/hablar - vuelvo a escribir\n"
-                   "O mandame texto y lo muestro en mi pantalla.");
+                   "/hablar - vuelvo a escribir");
         }
         return;
     }
 
-    // Texto común: mostrarlo en la pantalla del toy + acusar recibo
-    notify.push("Mensaje", texto, NotifIcon::CHAT);
-    enviar("lo muestro en mi pantalla 📺");
+    // Texto libre: lo guardamos para que main lo responda en personaje
+    // (main tiene acceso a humor/personalidad/hora). No respondemos acá.
+    snprintf(_mensaje, sizeof(_mensaje), "%s", t.c_str());
 }
 
 // ----- URL-encode ---------------------------------------------
