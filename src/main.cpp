@@ -41,7 +41,7 @@
 #include "imu.h"
 
 // ----- Display -----------------------------------------------
-U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
+U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE);  // R2 = 180° (montaje invertido)
 
 // ----- Máquina de estados global ------------------------------
 enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO };
