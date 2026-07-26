@@ -41,6 +41,7 @@
 #include "imu.h"
 #include "notify.h"
 #include "telegram.h"
+#include "presence.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE);  // R2 = 180° (montaje invertido)
@@ -609,6 +610,7 @@ void setup() {
     net.begin();
     ota.begin(&u8g2);
     telegram.begin();
+    presence.begin();
 
     idleExprActual = mood.dominantExpression();
     face.setExpression(idleExprActual);
@@ -640,6 +642,7 @@ void loop() {
     // Módulos de fondo
     imu.update(ahora);
     net.update(ahora);
+    presence.update(ahora);
 
     // Auto-OTA: solo fuera del menú para no pisar su render con la pantalla
     // de progreso. En IDLE o SLEEPING el chequeo bloqueante es aceptable.
@@ -788,6 +791,31 @@ void loop() {
         face.setExpression(idleExprActual);
         marcarActividad(ahora);
         entroADormirMs = ahora;
+    }
+
+    // ── Presencia por WiFi: llegaste / te fuiste ────────────────
+    if (presence.justArrived()) {
+        Serial.println("[app] presencia: llegaste");
+        // Despertar de standby (no interrumpir menú/nacimiento/reacción/aviso)
+        if (appState == AppState::STANDBY) { u8g2.setPowerSave(0); appState = AppState::IDLE; }
+        if (appState == AppState::IDLE) {
+            marcarActividad(ahora);
+            entroADormirMs = ahora;
+            mood.apply(MoodEffect::CARICIA);   // se pone contento de verte
+            sound.play(Melody::FELIZ);
+            reaccionar(Expression::ILUSIONADO, REACCION_TOUCH_MS, "", ahora);
+        }
+        if (telegram.habilitado() && !telegram.silenciado())
+            telegram.enviar("llegaste! te extranaba \xF0\x9F\xA5\xB3");
+    }
+    if (presence.justLeft()) {
+        Serial.println("[app] presencia: te fuiste");
+        if (appState == AppState::IDLE) {
+            sound.play(Melody::TRISTE);
+            reaccionar(Expression::TRISTE, REACCION_TOUCH_MS, "", ahora);
+        }
+        if (telegram.habilitado() && !telegram.silenciado())
+            telegram.enviar("te fuiste... te voy a extranar \xF0\x9F\xA5\xBA");
     }
 
     // Hora recién validada -> decaimiento offline (una sola vez)
