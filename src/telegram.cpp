@@ -115,6 +115,18 @@ void Telegram::_procesar(const char* texto) {
     String t(texto); t.trim();
     Serial.printf("[tg] recibido: %s\n", t.c_str());
 
+    // ":::" al inicio → mostrar el texto que sigue en la pantalla del toy
+    if (t.startsWith(":::")) {
+        String resto = t.substring(3);
+        resto.trim();
+        if (resto.length() == 0) enviar("mandame el texto asi: ::: hola!");
+        else {
+            notify.push("", resto.c_str(), NotifIcon::CHAT);  // sin título: globo con solo el texto
+            enviar("listo, lo muestro en mi pantalla 📺");
+        }
+        return;
+    }
+
     if (t.startsWith("/")) {
         String cmd = t; int sp = cmd.indexOf(' '); if (sp > 0) cmd = cmd.substring(0, sp);
         cmd.toLowerCase();
@@ -123,21 +135,11 @@ void Telegram::_procesar(const char* texto) {
         else if (cmd == "/sonido") { _cmd = Cmd::SONIDO; }
         else if (cmd == "/callar") { _silencio = true;  enviar("ok, me callo un rato 🤫"); }
         else if (cmd == "/hablar") { _silencio = false; enviar("volví! 🐹"); }
-        else if (cmd == "/mostrar" || cmd == "/pantalla") {
-            // Muestra el texto que sigue en la pantalla del toy
-            String resto = (sp > 0) ? t.substring(sp + 1) : "";
-            resto.trim();
-            if (resto.length() == 0) enviar("mandame el texto asi: /mostrar hola!");
-            else {
-                notify.push("", resto.c_str(), NotifIcon::CHAT);  // sin título: globo con solo el texto
-                enviar("listo, lo muestro en mi pantalla 📺");
-            }
-        }
         else { // /help /start u otro
             enviar("Soy Ramoncito 🐹\n"
                    "Haceme una pregunta y te contesto!\n"
                    "Ej: como estas? tenes hambre? contame un chiste\n\n"
-                   "/mostrar <texto> - lo muestro en mi pantalla\n"
+                   "::: <texto> - lo muestro en mi pantalla\n"
                    "/estado - como me siento\n"
                    "/feliz - ponerme contento\n"
                    "/sonido - mute on/off\n"
