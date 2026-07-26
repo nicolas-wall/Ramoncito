@@ -44,6 +44,15 @@
 
 #include "net.h"
 #include "config.h"
+#include "notify.h"
+
+// Clave opcional del webhook desde secrets.h (si existe).
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#endif
+#ifndef NOTIFY_TOKEN
+  #define NOTIFY_TOKEN ""
+#endif
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -586,6 +595,10 @@ void Net::_registrarRutas() {
         _server->on("/panel",       [this]() { _handlePanel(); });
         _server->on("/api/state",   [this]() { _handleApiState(); });
         _server->on("/api/action",  [this]() { _handleApiAction(); });
+    }
+    // Webhook de notificaciones: cualquier app de la LAN empuja un aviso.
+    if (NOTIFY_HABILITADO) {
+        _server->on("/api/notify",  [this]() { _handleApiNotify(); });
     }
 
     // Sondas de portal cautivo de Android, iOS, Windows
@@ -1186,6 +1199,32 @@ void Net::_handleApiAction() {
     snprintf(buf, sizeof(buf), "{\"ok\":%s,\"msg\":\"%s\"}",
              code == 200 ? "true" : "false", msg);
     _server->send(code, "application/json; charset=utf-8", buf);
+}
+
+// GET/POST /api/notify — empuja una notificación a la pantalla del toy.
+// Params: titulo|title, texto|text, icono|icon (chat|mail|bell|alerta|reloj),
+//         token (opcional). Auth: Basic Auth del panel, O ?token=NOTIFY_TOKEN
+//         si NOTIFY_TOKEN está configurado (más cómodo para Home Assistant/IFTTT).
+//   Ej: curl "http://ramoncito.local/api/notify?title=Mail&text=Tenes+2+nuevos&icon=mail" -u ramoncito:ramoncito
+void Net::_handleApiNotify() {
+    // Autorización: token del webhook o, si no, Basic Auth.
+    bool tokOk = (strlen(NOTIFY_TOKEN) > 0 && _server->arg("token") == NOTIFY_TOKEN);
+    if (!tokOk && !_panelAutorizado()) return;   // _panelAutorizado() ya pidió login
+
+    String titulo = _server->arg("titulo"); if (!titulo.length()) titulo = _server->arg("title");
+    String texto  = _server->arg("texto");  if (!texto.length())  texto  = _server->arg("text");
+    String icono  = _server->arg("icono");  if (!icono.length())  icono  = _server->arg("icon");
+
+    if (!texto.length() && !titulo.length()) {
+        _server->send(400, "application/json; charset=utf-8",
+                      "{\"ok\":false,\"msg\":\"falta title/text\"}");
+        return;
+    }
+    if (!titulo.length()) titulo = "Aviso";
+
+    notify.push(titulo.c_str(), texto.c_str(), Notify::iconoDeTexto(icono.c_str()));
+    Serial.printf("[web] notify: %s\n", titulo.c_str());
+    _server->send(200, "application/json; charset=utf-8", "{\"ok\":true}");
 }
 
 // HTML del dashboard: estático; se hidrata y auto-refresca vía /api/state.

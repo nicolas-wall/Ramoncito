@@ -39,13 +39,24 @@
 #include "menu.h"
 #include "ota.h"
 #include "imu.h"
+#include "notify.h"
+#include "telegram.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE);  // R2 = 180° (montaje invertido)
 
 // ----- Máquina de estados global ------------------------------
-enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO };
+enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO, NOTIF };
 static AppState appState = AppState::IDLE;
+
+// ----- Notificaciones en pantalla -----------------------------
+static Notif    notifActual;              // aviso que se está mostrando
+static uint32_t notifDesde   = 0;         // millis() cuando empezó a mostrarse
+static AppState notifVolverA = AppState::IDLE;  // estado al que volver al cerrar
+
+// ----- Disparadores de mensajes proactivos de Telegram --------
+static bool     tgEnergiaBajaAvisada = false;  // ya avisé "poca energia"
+static bool     tgUpdateAvisado      = false;  // ya avisé "hay update"
 
 static uint32_t menuHasta = 0;
 static const uint32_t MENU_TIMEOUT_MS = 10000;
@@ -403,6 +414,19 @@ static void despacharEventos(uint32_t ahora) {
             continue;
         }
 
+        // NOTIF: cualquier interacción cierra el aviso. El loop mostrará el
+        // siguiente de la cola si queda alguno; si no, vuelve a la vida normal.
+        if (appState == AppState::NOTIF) {
+            appState = (notifVolverA == AppState::STANDBY) ? AppState::IDLE : notifVolverA;
+            idleExprActual = mood.dominantExpression();
+            face.setExpression(idleExprActual);
+            marcarActividad(ahora);
+            entroADormirMs = ahora;
+            ultimoBotonMs  = ahora;   // lockout: que el mismo toque no dispare otra acción
+            sound.play(Melody::BIP);
+            continue;
+        }
+
         switch (ev) {
             case InputEvent::BTN_A_PRESS:
                 ultimoBotonMs = ahora;
@@ -584,6 +608,7 @@ void setup() {
     imu.begin();   // requiere Wire ya iniciado; falla silenciosamente si no hay MPU
     net.begin();
     ota.begin(&u8g2);
+    telegram.begin();
 
     idleExprActual = mood.dominantExpression();
     face.setExpression(idleExprActual);
@@ -686,6 +711,83 @@ void loop() {
         case WebAction::NINGUNA:
         default:
             break;
+    }
+
+    // ── Telegram: mensajes entrantes + comandos ─────────────────
+    // El poll HTTPS bloquea unos cientos de ms: se salta mientras el toy está
+    // "ocupado" (reacción/menú/animación/aviso) para no cortar la animación.
+    {
+        bool tgOcupado = (appState == AppState::REACTING || appState == AppState::MENU ||
+                          appState == AppState::NACIENDO || appState == AppState::NOTIF);
+        telegram.update(ahora, tgOcupado);
+        switch (telegram.tomarComando()) {
+            case Telegram::Cmd::ESTADO: {
+                char m[128];
+                snprintf(m, sizeof(m),
+                    "Estoy %s \xF0\x9F\x90\xB9\nFelicidad %u | Energia %u | Aburrimiento %u\nEdad: %d dias",
+                    nombreExpresion(idleExprActual),
+                    mood.happiness(), mood.energy(), mood.boredom(), personality.edadDias());
+                telegram.enviar(m);
+                break;
+            }
+            case Telegram::Cmd::FELIZ:
+                mood.apply(MoodEffect::CARICIA);
+                personality.event(PersEvent::CARICIA);
+                if (appState == AppState::IDLE || appState == AppState::REACTING) {
+                    sound.play(Melody::AMOR);
+                    reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora, true);
+                }
+                break;
+            case Telegram::Cmd::SONIDO:
+                sound.setEnabled(!sound.enabled());
+                telegram.enviar(sound.enabled() ? "sonido ON \xF0\x9F\x94\x8A" : "sonido OFF \xF0\x9F\x94\x87");
+                if (sound.enabled()) sound.play(Melody::BIP);
+                break;
+            case Telegram::Cmd::NINGUNO:
+            default:
+                break;
+        }
+
+        // Mensajes proactivos (respetan /callar). El flag se marca solo si el
+        // envío salió (enviar() está rate-limited); así reintenta si se descartó.
+        if (telegram.habilitado() && !telegram.silenciado()) {
+            if (mood.energy() < 15 && !tgEnergiaBajaAvisada) {
+                if (telegram.enviar("Tengo poca energia... \xF0\x9F\xA5\xB1 necesito descansar."))
+                    tgEnergiaBajaAvisada = true;
+            } else if (mood.energy() > 35) {
+                tgEnergiaBajaAvisada = false;
+            }
+            if (ota.hayActualizacion() && !tgUpdateAvisado) {
+                char m[96];
+                snprintf(m, sizeof(m),
+                    "Hay una actualizacion nueva (v%s) \xE2\x9C\xA8 instalala cuando quieras.",
+                    ota.versionNueva());
+                if (telegram.enviar(m)) tgUpdateAvisado = true;
+            }
+        }
+    }
+
+    // ── Notificaciones en pantalla ──────────────────────────────
+    // Si hay un aviso en cola y el estado lo permite, mostrarlo (enciende la
+    // pantalla si estaba en standby). No interrumpe menú/nacimiento/reacción.
+    if (notify.hayPendiente() &&
+        appState != AppState::MENU && appState != AppState::NACIENDO &&
+        appState != AppState::REACTING && appState != AppState::NOTIF) {
+        notifVolverA = appState;
+        if (appState == AppState::STANDBY) u8g2.setPowerSave(0);  // encender pantalla
+        notify.pop(notifActual);
+        notifDesde = ahora;
+        appState = AppState::NOTIF;
+        marcarActividad(ahora);
+        sound.play(Melody::SORPRESA);
+    }
+    // Auto-cierre del aviso tras NOTIF_AUTO_MS (si no lo tocaron antes).
+    if (appState == AppState::NOTIF && (ahora - notifDesde) >= NOTIF_AUTO_MS) {
+        appState = (notifVolverA == AppState::STANDBY) ? AppState::IDLE : notifVolverA;
+        idleExprActual = mood.dominantExpression();
+        face.setExpression(idleExprActual);
+        marcarActividad(ahora);
+        entroADormirMs = ahora;
     }
 
     // Hora recién validada -> decaimiento offline (una sola vez)
@@ -1067,6 +1169,8 @@ void loop() {
         // Página 4 · Ajustes
         md.ajustesSel  = ajustesSel;
         menuRender(u8g2, md, menuPagina);
+    } else if (appState == AppState::NOTIF) {
+        notify.render(u8g2, notifActual, ahora, notifDesde);
     } else {
         face.render(u8g2);
         if (appState == AppState::REACTING && reaccionLabel[0] != '\0') {

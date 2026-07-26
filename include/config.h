@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.16"
+#define FW_VERSION "0.9.17"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
@@ -291,6 +291,22 @@ static const uint32_t OTA_CHECK_INTERVALO_MS = 24UL * 3600UL * 1000UL; // despu�
 // algo de ruido en el táctil; ideal enchufado. Requiere WIFI_INTENTAR_STA.
 static const bool     PANEL_LAN_HABILITADO = true;
 static const char*    PANEL_MDNS_HOST      = "ramoncito";   // → http://ramoncito.local
+
+// ----- Notificaciones en pantalla -------------------------------------
+// Ramoncito puede mostrar avisos (ícono + título + texto que scrollea),
+// sonar y encenderse desde standby. Las fuentes son Telegram (mensajes
+// entrantes) y el webhook POST /api/notify (cualquier app en la LAN).
+static const bool     NOTIFY_HABILITADO = true;
+static const uint32_t NOTIF_AUTO_MS     = 12000;  // auto-cierre del aviso en pantalla
+
+// ----- Telegram (mensajes de ida y vuelta) ----------------------------
+// Requiere TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID en secrets.h. Con token
+// vacío queda desactivado solo. Ramoncito te escribe (poca energía, update
+// disponible, saludo) y vos le mandás texto/comandos (/estado, /feliz,
+// /sonido, /callar, /help). Solo obedece a TELEGRAM_CHAT_ID (whitelist).
+static const bool     TELEGRAM_HABILITADO = true;
+static const uint32_t TELEGRAM_POLL_MS    = 5000;   // cada cuánto revisa mensajes entrantes
+static const uint32_t TELEGRAM_MIN_ENVIO_MS = 3000; // anti-spam entre envíos salientes
 
 // ==== IMU (MPU6050 en GY-521) ====
 // Dirección I2C: AD0 a 3V3 → 0x69 (0x68 lo ocupa el RTC DS3231)

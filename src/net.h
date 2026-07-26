@@ -180,6 +180,7 @@ private:
     void _handlePanel();      // GET  /panel — dashboard HTML
     void _handleApiState();   // GET  /api/state — snapshot en JSON
     void _handleApiAction();  // GET  /api/action?do=... — encola una WebAction
+    void _handleApiNotify();  // GET/POST /api/notify — encola una notificación en pantalla
     String _htmlPanel();      // HTML del dashboard (auto-refresca vía /api/state)
 
     // Genera el HTML del portal (strings en RAM; se descarta tras enviar)
