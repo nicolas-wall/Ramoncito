@@ -123,10 +123,21 @@ void Telegram::_procesar(const char* texto) {
         else if (cmd == "/sonido") { _cmd = Cmd::SONIDO; }
         else if (cmd == "/callar") { _silencio = true;  enviar("ok, me callo un rato 🤫"); }
         else if (cmd == "/hablar") { _silencio = false; enviar("volví! 🐹"); }
+        else if (cmd == "/mostrar" || cmd == "/pantalla") {
+            // Muestra el texto que sigue en la pantalla del toy
+            String resto = (sp > 0) ? t.substring(sp + 1) : "";
+            resto.trim();
+            if (resto.length() == 0) enviar("mandame el texto asi: /mostrar hola!");
+            else {
+                notify.push("Mensaje", resto.c_str(), NotifIcon::CHAT);
+                enviar("listo, lo muestro en mi pantalla 📺");
+            }
+        }
         else { // /help /start u otro
             enviar("Soy Ramoncito 🐹\n"
                    "Haceme una pregunta y te contesto!\n"
                    "Ej: como estas? tenes hambre? contame un chiste\n\n"
+                   "/mostrar <texto> - lo muestro en mi pantalla\n"
                    "/estado - como me siento\n"
                    "/feliz - ponerme contento\n"
                    "/sonido - mute on/off\n"
