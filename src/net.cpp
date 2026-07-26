@@ -45,7 +45,6 @@
 #include "net.h"
 #include "config.h"
 #include "notify.h"
-#include "presence.h"
 
 // Clave opcional del webhook desde secrets.h (si existe).
 #if __has_include("secrets.h")
@@ -600,10 +599,6 @@ void Net::_registrarRutas() {
     // Webhook de notificaciones: cualquier app de la LAN empuja un aviso.
     if (NOTIFY_HABILITADO) {
         _server->on("/api/notify",  [this]() { _handleApiNotify(); });
-    }
-    // Presencia: vincular el teléfono (usa la IP del cliente que llama).
-    if (PRESENCE_HABILITADO) {
-        _server->on("/api/track",   [this]() { _handleApiTrack(); });
     }
 
     // Sondas de portal cautivo de Android, iOS, Windows
@@ -1161,20 +1156,18 @@ void Net::_handlePanel() {
 // GET /api/state — snapshot del estado en JSON (lo refresca main.cpp)
 void Net::_handleApiState() {
     if (!_panelAutorizado()) return;
-    char buf[600];
+    char buf[512];
     snprintf(buf, sizeof(buf),
         "{\"felicidad\":%u,\"energia\":%u,\"aburrimiento\":%u,"
         "\"animo\":%u,\"energiaPers\":%u,\"edadDias\":%d,"
         "\"sonido\":%s,\"hayUpdate\":%s,\"fw\":\"%s\",\"verNueva\":\"%s\","
-        "\"expr\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\","
-        "\"presente\":%s,\"phoneIP\":\"%s\"}",
+        "\"expr\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\"}",
         _web.felicidad, _web.energia, _web.aburrimiento,
         _web.animo, _web.energia_pers, _web.edadDias,
         _web.sonido ? "true" : "false",
         _web.hayUpdate ? "true" : "false",
         _web.fwVersion, _web.versionNueva, _web.expresion,
-        _ssid.c_str(), WiFi.localIP().toString().c_str(),
-        presence.presente() ? "true" : "false", presence.targetIP());
+        _ssid.c_str(), WiFi.localIP().toString().c_str());
     _server->send(200, "application/json; charset=utf-8", buf);
 }
 
@@ -1234,17 +1227,6 @@ void Net::_handleApiNotify() {
     _server->send(200, "application/json; charset=utf-8", "{\"ok\":true}");
 }
 
-// GET /api/track — vincula el teléfono usando la IP del cliente HTTP que
-// llama (la del navegador que abrió el panel). Se guarda en NVS.
-void Net::_handleApiTrack() {
-    if (!_panelAutorizado()) return;
-    String ip = _server->client().remoteIP().toString();
-    bool ok = presence.setTargetIP(ip.c_str());
-    char buf[96];
-    snprintf(buf, sizeof(buf), "{\"ok\":%s,\"ip\":\"%s\"}", ok ? "true" : "false", ip.c_str());
-    _server->send(ok ? 200 : 400, "application/json; charset=utf-8", buf);
-}
-
 // HTML del dashboard: estilo "character creator" dibujado a mano (cutekart).
 String Net::_htmlPanel() {
     return String(R"rawhtml(<!DOCTYPE html>
@@ -1302,9 +1284,6 @@ String Net::_htmlPanel() {
   .reload{width:40px;height:40px;border:2.8px solid var(--ink);border-radius:50%;background:var(--paper);
     cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px}
   .sys{font-size:.66rem;font-weight:700;opacity:.6;margin-top:9px;text-align:center}
-  .pres{margin-top:9px;text-align:center;font-size:.76rem;font-weight:800;cursor:pointer;
-    border:2.5px dashed var(--ink);border-radius:14px 9px 16px 9px/9px 16px 9px 14px;padding:7px 10px;background:var(--paper)}
-  .pres.on{background:#dcecd0;border-style:solid}
   .upd{display:none;margin-top:10px;border:2.5px dashed var(--ink);background:#e7f0d8;border-radius:12px;padding:8px 10px;font-size:.76rem;font-weight:700}
   .upd b{cursor:pointer;text-decoration:underline}
   #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(8px);background:var(--paper);color:var(--ink);
@@ -1358,7 +1337,6 @@ String Net::_htmlPanel() {
         <div class="reload" title="Actualizar" onclick="refresh()">&#8635;</div>
       </div>
       <div class="sys" id="sys">--</div>
-      <div class="pres" id="pres" onclick="linkPhone()">telefono: sin vincular</div>
       <div class="upd" id="upd"></div>
     </div>
   </div>
@@ -1387,10 +1365,6 @@ async function refresh(){
     document.getElementById('url').textContent='WWW.RAMONCITO.LOCAL / '+(s.ip||'CHARACTER');
     document.getElementById('sys').textContent='v'+s.fw+'  .  '+(s.edadDias<0?'0':s.edadDias)+' DIAS  .  '+(s.ssid||'-');
     document.getElementById('ico-snd').innerHTML=(s.sonido?'🔊':'🔇');
-    var pr=document.getElementById('pres');
-    if(!s.phoneIP){pr.className='pres';pr.textContent='telefono: sin vincular (tocar)';}
-    else{pr.className='pres'+(s.presente?' on':'');
-      pr.textContent=(s.presente?'🏠 estas cerca':'🚪 afuera')+'  .  '+s.phoneIP;}
     var upd=document.getElementById('upd'),bang=document.getElementById('bang');
     if(s.hayUpdate){upd.style.display='block';
       upd.innerHTML='Nueva version v'+s.verNueva+' - <b onclick="act(\'ota_install\',\'Instalar la nueva version? El toy se reinicia.\')">INSTALAR</b>';
@@ -1403,12 +1377,6 @@ async function act(doName,confirmMsg){
   var q='/api/action?do='+doName+(doName==='renacer'?'&confirm=1':'');
   try{var r=await fetch(q);var j=await r.json();toast(j.msg);}catch(e){toast('error de red');}
   setTimeout(refresh,900);
-}
-async function linkPhone(){
-  if(!confirm('Vincular ESTE telefono para que Ramoncito sepa cuando estas cerca?'))return;
-  try{var r=await fetch('/api/track');var j=await r.json();
-    toast(j.ok?('vinculado: '+j.ip):'no se pudo vincular');}catch(e){toast('error de red');}
-  setTimeout(refresh,700);
 }
 setInterval(refresh,2000);refresh();
 </script>

@@ -181,7 +181,6 @@ private:
     void _handleApiState();   // GET  /api/state — snapshot en JSON
     void _handleApiAction();  // GET  /api/action?do=... — encola una WebAction
     void _handleApiNotify();  // GET/POST /api/notify — encola una notificación en pantalla
-    void _handleApiTrack();   // GET /api/track — vincula el teléfono (IP del cliente)
     String _htmlPanel();      // HTML del dashboard (auto-refresca vía /api/state)
 
     // Genera el HTML del portal (strings en RAM; se descarta tras enviar)
