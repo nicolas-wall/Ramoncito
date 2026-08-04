@@ -1,11 +1,11 @@
 // ============================================================
-//  input.cpp — Módulo de entradas: botón y touch capacitivo
+//  input.cpp — Entradas del arcade: botones + palanca analógica
 //  Seeed XIAO ESP32-S3, framework Arduino
 //
-//  IMPORTANTE — comportamiento del touch en ESP32-S3:
-//    touchRead() devuelve valores GRANDES en reposo (20000-30000)
-//    y AUMENTAN al tocar. Contrario al ESP32 original.
-//    Umbral: valor > baseline * TOUCH_FACTOR_UMBRAL  →  toque detectado.
+//  La palanca es un par de potenciómetros: cada eje entrega una tensión
+//  de 0 a 3.3 V que el ADC1 lee como 0..4095, con el reposo cerca de la
+//  mitad. "Cerca" y no "exactamente": cada unidad tiene su propio centro,
+//  por eso se calibra al bootear en vez de asumir 2048.
 // ============================================================
 #include "input.h"
 #include "config.h"
@@ -27,53 +27,20 @@ void Input::_enqueue(InputEvent ev) {
 }
 
 // ============================================================
-//  _calibrateTouch() — autocalibración de un sensor táctil
+//  _calibrarEje() — centro de reposo de un eje
+//  Promedio simple de JOY_MUESTRAS_CALIB lecturas. Importante:
+//  no tocar la palanca durante el boot.
 // ============================================================
 
-void Input::_calibrateTouch(TouchState& t, uint8_t pin, const char* label) {
-    const uint16_t N = TOUCH_MUESTRAS_CALIB;
-    uint32_t muestras[N];
-
-    Serial.printf("[input] calibrando %s...\n", label);
-
-    for (uint16_t i = 0; i < N; i++) {
-        muestras[i] = touchRead(pin);
-        delay(10);
+uint16_t Input::_calibrarEje(uint8_t pin, const char* label) {
+    uint32_t suma = 0;
+    for (uint16_t i = 0; i < JOY_MUESTRAS_CALIB; i++) {
+        suma += (uint16_t)analogRead(pin);
+        delay(2);
     }
-
-    // Insertion sort
-    for (uint16_t i = 1; i < N; i++) {
-        uint32_t key = muestras[i];
-        int16_t  j   = i - 1;
-        while (j >= 0 && muestras[j] > key) {
-            muestras[j + 1] = muestras[j];
-            j--;
-        }
-        muestras[j + 1] = key;
-    }
-
-    uint16_t recorte = N / 10;
-    if (recorte == 0) recorte = 1;
-
-    uint64_t suma  = 0;
-    uint16_t count = 0;
-    for (uint16_t i = recorte; i < N - recorte; i++) {
-        suma += muestras[i];
-        count++;
-    }
-
-    t.baseline    = (count > 0) ? (uint32_t)(suma / count) : muestras[N / 2];
-    t.threshHigh  = (uint32_t)(t.baseline * TOUCH_FACTOR_UMBRAL);
-    float factorBajo = 1.0f + (TOUCH_FACTOR_UMBRAL - 1.0f) * 0.6f;
-    t.threshLow   = (uint32_t)(t.baseline * factorBajo);
-    t.lastValue   = muestras[N / 2];
-    t.lastPollMs  = 0;
-    t.isTouching  = false;
-    t.consecHigh  = 0;
-    t.consecLow   = 0;
-
-    Serial.printf("[input] %s baseline=%lu umbral=%lu\n",
-                  label, (unsigned long)t.baseline, (unsigned long)t.threshHigh);
+    uint16_t centro = (uint16_t)(suma / JOY_MUESTRAS_CALIB);
+    Serial.printf("[input] eje %s centro=%u\n", label, centro);
+    return centro;
 }
 
 // ============================================================
@@ -85,11 +52,33 @@ void Input::begin() {
     _qTail  = 0;
     _qCount = 0;
 
-    pinMode(PIN_BTN_A, INPUT_PULLUP);
-    _btnA = { false, true, 0 };
+    // Todos los botones a GND con pull-up interno. Un pin sin botón
+    // conectado queda en HIGH = suelto, así que sobra con no cablearlos.
+    pinMode(PIN_BTN_A,  INPUT_PULLUP);
+    pinMode(PIN_BTN_B,  INPUT_PULLUP);
+    pinMode(PIN_BTN_C,  INPUT_PULLUP);
+    pinMode(PIN_JOY_SW, INPUT_PULLUP);
 
-    _calibrateTouch(_touch,    PIN_TOUCH,     "touch-cabeza");
-    _calibrateTouch(_touchPie, PIN_TOUCH_PIE, "touch-pie");
+    _btnA = _btnB = _btnC = _joySw = { false, true, 0 };
+
+    _ejeX = { 0, 0, 0.0f, 0, 0 };
+    _ejeY = { 0, 0, 0.0f, 0, 0 };
+    _lastJoyPollMs = 0;
+    _stubX = _stubY = 0.0f;
+    _stubHasta = 0;
+
+    if (JOYSTICK_PRESENTE) {
+        analogReadResolution(12);
+        // 11 dB = fondo de escala ~3.3 V, que es el rango de la palanca.
+        analogSetPinAttenuation(PIN_JOY_X, ADC_11db);
+        analogSetPinAttenuation(PIN_JOY_Y, ADC_11db);
+        _ejeX.centro = _calibrarEje(PIN_JOY_X, "X");
+        _ejeY.centro = _calibrarEje(PIN_JOY_Y, "Y");
+    } else {
+        // Sin palanca: centro nominal, y los ejes se alimentan del stub.
+        _ejeX.centro = _ejeY.centro = JOY_ADC_MAX / 2;
+        Serial.println("[input] palanca AUSENTE — ejes emulados por serial (w/a/s/d)");
+    }
 }
 
 // ============================================================
@@ -106,7 +95,7 @@ void Input::_pollBtn(BtnState& btn, uint8_t pin, InputEvent evPress,
     }
 
     if ((now - btn.lastChangeMs) >= DEBOUNCE_MS) {
-        bool nuevoEstado = !btn.raw;
+        bool nuevoEstado = !btn.raw;   // pull-up: LOW = presionado
 
         if (nuevoEstado && !btn.debounced) {
             btn.debounced = true;
@@ -119,47 +108,64 @@ void Input::_pollBtn(BtnState& btn, uint8_t pin, InputEvent evPress,
 }
 
 // ============================================================
-//  _pollTouch() — muestreo con confirmación para un sensor
+//  _normalizar() — ADC crudo → -1..+1 con zona muerta
+//
+//  Los dos lados del recorrido se escalan por separado porque el centro
+//  calibrado casi nunca cae justo en la mitad: si se usara un único
+//  divisor, un lado llegaría a 1.0 antes que el otro.
 // ============================================================
 
-void Input::_pollTouch(TouchState& t, uint8_t pin,
-                       InputEvent evStart, InputEvent evEnd,
-                       bool emitEnd, uint32_t now) {
-    if ((now - t.lastPollMs) < TOUCH_POLL_MS) return;
-    t.lastPollMs = now;
-
-    uint32_t val = touchRead(pin);
-    t.lastValue  = val;
-
-    if (!t.isTouching) {
-        if (val > t.threshHigh) {
-            t.consecHigh++;
-            t.consecLow = 0;
-            if (t.consecHigh >= TOUCH_LECTURAS_CONFIRMA) {
-                t.isTouching = true;
-                t.consecHigh = 0;
-                _enqueue(evStart);
-                Serial.printf("[input] %s inicio (val=%lu)\n",
-                              pin == PIN_TOUCH ? "TOUCH" : "TICKLE",
-                              (unsigned long)val);
-            }
-        } else {
-            t.consecHigh = 0;
-        }
+float Input::_normalizar(const AxisState& eje, uint16_t raw, bool invertir) const {
+    float v;
+    if (raw >= eje.centro) {
+        uint16_t span = (uint16_t)(JOY_ADC_MAX - eje.centro);
+        v = (span > 0) ? (float)(raw - eje.centro) / (float)span : 0.0f;
     } else {
-        if (val <= t.threshLow) {
-            t.consecLow++;
-            t.consecHigh = 0;
-            if (t.consecLow >= TOUCH_LECTURAS_CONFIRMA) {
-                t.isTouching = false;
-                t.consecLow  = 0;
-                if (emitEnd) _enqueue(evEnd);
-                Serial.printf("[input] %s fin\n",
-                              pin == PIN_TOUCH ? "TOUCH" : "TICKLE");
-            }
-        } else {
-            t.consecLow = 0;
+        uint16_t span = eje.centro;
+        v = (span > 0) ? -(float)(eje.centro - raw) / (float)span : 0.0f;
+    }
+
+    if (invertir) v = -v;
+    if (v >  1.0f) v =  1.0f;
+    if (v < -1.0f) v = -1.0f;
+
+    // Zona muerta con reescalado: apenas se sale de la deadzone el valor
+    // arranca en 0 y no salta a JOY_DEADZONE (si no, el control da un tirón).
+    float mag = fabsf(v);
+    if (mag < JOY_DEADZONE) return 0.0f;
+    float escalado = (mag - JOY_DEADZONE) / (1.0f - JOY_DEADZONE);
+    return (v < 0) ? -escalado : escalado;
+}
+
+// ============================================================
+//  _pollEje() — valor continuo → dirección discreta + auto-repeat
+// ============================================================
+
+void Input::_pollEje(AxisState& eje, float valor,
+                     InputEvent evNeg, InputEvent evPos, uint32_t now) {
+    eje.value = valor;
+    float mag = fabsf(valor);
+
+    if (eje.dir == 0) {
+        // Suelto: activar solo al superar el umbral alto.
+        if (mag >= JOY_UMBRAL_ON) {
+            eje.dir          = (valor < 0) ? -1 : 1;
+            eje.nextRepeatMs = now + JOY_REPEAT_DELAY_MS;
+            _enqueue(eje.dir < 0 ? evNeg : evPos);
         }
+        return;
+    }
+
+    // Sostenido: soltar al bajar del umbral bajo o al cruzar al otro lado.
+    bool mismoLado = (eje.dir < 0) ? (valor < 0) : (valor > 0);
+    if (mag < JOY_UMBRAL_OFF || !mismoLado) {
+        eje.dir = 0;
+        return;
+    }
+
+    if ((int32_t)(now - eje.nextRepeatMs) >= 0) {
+        eje.nextRepeatMs = now + JOY_REPEAT_MS;
+        _enqueue(eje.dir < 0 ? evNeg : evPos);
     }
 }
 
@@ -168,11 +174,34 @@ void Input::_pollTouch(TouchState& t, uint8_t pin,
 // ============================================================
 
 void Input::poll(uint32_t now) {
-    _pollBtn(_btnA, PIN_BTN_A, InputEvent::BTN_A_PRESS, "BTN_A", now);
-    // Caricia en la cabeza: emite START y END
-    _pollTouch(_touch,    PIN_TOUCH,     InputEvent::TOUCH_START,  InputEvent::TOUCH_END,   true,  now);
-    // Cosquillas en el pie: solo emite START (cada toque cuenta como un evento)
-    _pollTouch(_touchPie, PIN_TOUCH_PIE, InputEvent::TICKLE_START, InputEvent::NONE,        false, now);
+    _pollBtn(_btnA,  PIN_BTN_A,  InputEvent::BTN_A_PRESS,  "BTN_A",  now);
+    _pollBtn(_btnB,  PIN_BTN_B,  InputEvent::BTN_B_PRESS,  "BTN_B",  now);
+    _pollBtn(_btnC,  PIN_BTN_C,  InputEvent::BTN_C_PRESS,  "BTN_C",  now);
+    _pollBtn(_joySw, PIN_JOY_SW, InputEvent::JOY_SW_PRESS, "JOY_SW", now);
+
+    if ((now - _lastJoyPollMs) < JOY_POLL_MS) return;
+    _lastJoyPollMs = now;
+
+    float vx, vy;
+    if (JOYSTICK_PRESENTE) {
+        _ejeX.raw = (uint16_t)analogRead(PIN_JOY_X);
+        _ejeY.raw = (uint16_t)analogRead(PIN_JOY_Y);
+        vx = _normalizar(_ejeX, _ejeX.raw, JOY_INVERTIR_X);
+        vy = _normalizar(_ejeY, _ejeY.raw, JOY_INVERTIR_Y);
+    } else {
+        // Stub: el "golpe" de tecla vuelve solo al centro.
+        if (_stubHasta != 0 && (int32_t)(now - _stubHasta) >= 0) {
+            _stubX = _stubY = 0.0f;
+            _stubHasta = 0;
+        }
+        vx = _stubX;
+        vy = _stubY;
+        _ejeX.raw = _ejeX.centro;
+        _ejeY.raw = _ejeY.centro;
+    }
+
+    _pollEje(_ejeX, vx, InputEvent::JOY_LEFT, InputEvent::JOY_RIGHT, now);
+    _pollEje(_ejeY, vy, InputEvent::JOY_UP,   InputEvent::JOY_DOWN,  now);
 }
 
 // ============================================================
@@ -188,13 +217,42 @@ InputEvent Input::nextEvent() {
 }
 
 // ============================================================
+//  Stub de la palanca (mientras no esté el hardware)
+// ============================================================
+
+void Input::setStubAxis(float x, float y, uint32_t now) {
+    if (JOYSTICK_PRESENTE) return;
+    _stubX     = x;
+    _stubY     = y;
+    _stubHasta = now + JOY_STUB_AUTOCENTRO_MS;
+}
+
+void Input::injectEvent(InputEvent ev) {
+    _enqueue(ev);
+}
+
+// ============================================================
 //  Accessors
 // ============================================================
 
-bool     Input::btnA()             const { return _btnA.debounced;       }
-bool     Input::touching()         const { return _touch.isTouching;     }
-bool     Input::touchingPie()      const { return _touchPie.isTouching;  }
-uint32_t Input::touchValue()       const { return _touch.lastValue;      }
-uint32_t Input::touchBaseline()    const { return _touch.baseline;       }
-uint32_t Input::touchValuePie()    const { return _touchPie.lastValue;   }
-uint32_t Input::touchBaselinePie() const { return _touchPie.baseline;    }
+bool  Input::btnA()   const { return _btnA.debounced;  }
+bool  Input::btnB()   const { return _btnB.debounced;  }
+bool  Input::btnC()   const { return _btnC.debounced;  }
+bool  Input::joySw()  const { return _joySw.debounced; }
+bool  Input::anyBtn() const {
+    return _btnA.debounced || _btnB.debounced || _btnC.debounced || _joySw.debounced;
+}
+
+float Input::axisX() const { return _ejeX.value; }
+float Input::axisY() const { return _ejeY.value; }
+
+bool  Input::left()  const { return _ejeX.dir < 0; }
+bool  Input::right() const { return _ejeX.dir > 0; }
+bool  Input::up()    const { return _ejeY.dir < 0; }
+bool  Input::down()  const { return _ejeY.dir > 0; }
+
+bool     Input::joystickPresente() const { return JOYSTICK_PRESENTE; }
+uint16_t Input::rawX()    const { return _ejeX.raw;    }
+uint16_t Input::rawY()    const { return _ejeY.raw;    }
+uint16_t Input::centroX() const { return _ejeX.centro; }
+uint16_t Input::centroY() const { return _ejeY.centro; }

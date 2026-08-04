@@ -8,15 +8,30 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.9.25"
+#define FW_VERSION "0.10.0"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
-static const uint8_t PIN_LED       = 21;  // LED integrado, activo en BAJO
-static const uint8_t PIN_BTN_A     = 1;   // D0 — botón oculto (a GND, pull-up interno)
-static const uint8_t PIN_TOUCH     = 3;   // D2 — sensor táctil (caricia en la cabeza)
-static const uint8_t PIN_TOUCH_PIE = 7;   // D8 — sensor táctil del pie (cosquillas)
-static const uint8_t PIN_BUZZER    = 4;   // D3 — buzzer pasivo (PWM LEDC)
+// Pinout ARCADE. Los dos sensores táctiles capacitivos de la etapa
+// "mascota" se retiraron: esos pines ahora los usan la palanca y un botón.
+//
+// Los ejes analógicos deben ir sí o sí a pines del ADC1 (GPIO1..GPIO10):
+// el ADC2 queda inutilizable con el WiFi encendido, y acá el WiFi está
+// siempre activo (OTA + panel LAN + Telegram).
+static const uint8_t PIN_LED    = 21;  // LED integrado, activo en BAJO
+static const uint8_t PIN_BTN_A  = 1;   // D0  — botón 1 (a GND, pull-up interno)
+static const uint8_t PIN_BTN_B  = 9;   // D10 — botón 2 (a GND, pull-up interno)
+static const uint8_t PIN_BTN_C  = 3;   // D2  — botón 3 / START (a GND, pull-up interno)
+static const uint8_t PIN_JOY_SW = 7;   // D8  — pulsador de la palanca (a GND, pull-up interno)
+static const uint8_t PIN_JOY_X  = 2;   // D1  — eje X analógico (ADC1_CH1)
+static const uint8_t PIN_JOY_Y  = 8;   // D9  — eje Y analógico (ADC1_CH7)
+static const uint8_t PIN_BUZZER = 4;   // D3  — buzzer pasivo (PWM LEDC)
 // I2C del OLED: SDA=GPIO5 (D4), SCL=GPIO6 (D5) — defaults de Wire en el XIAO
+//
+// Nota sobre GPIO3 (D2): es pin de strapping del ESP32-S3 (selección de
+// JTAG). Con los eFuses de fábrica se ignora al bootear, y el pull-up
+// interno lo deja en HIGH = botón suelto, que es el estado seguro. Por eso
+// va un BOTÓN acá y no un eje analógico: un eje en reposo queda a media
+// tensión (nivel lógico indefinido durante el boot).
 
 // ----- Display -----------------------------------------------
 static const uint32_t I2C_CLOCK_HZ = 400000;
@@ -32,12 +47,34 @@ static const uint32_t TIME_SCALE = 1;
 // ----- Botones ------------------------------------------------
 static const uint32_t DEBOUNCE_MS = 30;
 
-// ----- Touch capacitivo (ESP32-S3: el valor SUBE al tocar) ----
-static const uint16_t TOUCH_MUESTRAS_CALIB    = 50;
-static const float    TOUCH_FACTOR_UMBRAL     = 1.15f;
-static const uint8_t  TOUCH_LECTURAS_CONFIRMA = 3;
-static const uint32_t TOUCH_POLL_MS           = 20;
-static const uint32_t TOUCH_LOCKOUT_BOTON_MS = 800;  // ignorar touch tras apretar el botón (toques fantasma por acople)
+// ----- Palanca (joystick analógico tipo KY-023 / thumbstick PS2) -----
+// Mientras no esté el módulo físico, dejar JOYSTICK_PRESENTE en false: los
+// ejes NO se leen del ADC (un pin al aire flota y dispararía direcciones
+// solo) y se emulan por serial con w/a/s/d — ver procesarComando() en
+// main.cpp. Al soldar la palanca, cambiar a true y recompilar.
+static const bool     JOYSTICK_PRESENTE      = false;
+
+static const uint16_t JOY_ADC_MAX            = 4095;  // 12 bits de resolución
+static const uint16_t JOY_MUESTRAS_CALIB     = 32;    // lecturas para fijar el centro al boot
+// Zona muerta: por debajo de esto el eje se reporta como 0. Los thumbsticks
+// baratos no vuelven exactamente al centro, sin deadzone hay deriva.
+static const float    JOY_DEADZONE           = 0.18f;
+// Histéresis para convertir el eje analógico en una dirección discreta:
+// activa al superar ON, y no se suelta hasta bajar de OFF. Sin esto, una
+// palanca sostenida cerca del umbral genera un tren de eventos.
+static const float    JOY_UMBRAL_ON          = 0.50f;
+static const float    JOY_UMBRAL_OFF         = 0.35f;
+static const uint32_t JOY_POLL_MS            = 15;    // muestreo del ADC (~66 Hz)
+// Auto-repeat al mantener la palanca (navegación de menús estilo arcade)
+static const uint32_t JOY_REPEAT_DELAY_MS    = 380;   // espera antes del primer repeat
+static const uint32_t JOY_REPEAT_MS          = 130;   // cadencia del repeat sostenido
+// Si al probar la palanca los ejes van al revés, invertirlos acá (no hay
+// que tocar el cableado ni la lógica de los juegos).
+static const bool     JOY_INVERTIR_X         = false;
+static const bool     JOY_INVERTIR_Y         = true;  // en el KY-023 el ADC de Y crece hacia abajo
+// Stub sin hardware: cuánto dura el "golpe" de palanca que simula una tecla
+// antes de volver sola al centro.
+static const uint32_t JOY_STUB_AUTOCENTRO_MS = 220;
 
 // ----- Reacciones (duraciones en ms) --------------------------
 static const uint32_t REACCION_BTN_MS    = 1500;

@@ -2,17 +2,14 @@
 //  Ramoncito — main.cpp
 //  Orquestador: máquina de estados, eventos, mood/sound/net.
 //
-//  Interacciones (Etapa A — doc 06 §1):
-//    Caricia (D2) → AMOR + buen humor. Durante malhumor: perdona (÷2 tiempo restante).
-//    Cosquillas (D8) → FELIZ hasta TICKLE_SEGUIDAS_MAX; después ENOJADO.
-//      Tras el enojo entra en malhumor (MALHUMOR_MS). Durante malhumor:
-//        cosquillas → renuevan el enojo y extienden el malhumor.
-//      Al expirar el malhumor: ticklesSeguidos vuelve a 0.
-//    Botón (D0) → menú de estado (utilidad, nunca afecta humor).
-//    De noche (SLEEPING):
-//      1.ª caricia → cara FELIZ 2 s sin salir de SLEEPING.
-//      2.ª caricia en ≤30 s, o cualquier cosquilla → enojo nocturno 2.5 s, vuelve a DORMIDO.
-//    Inactividad: cada 30 min → cara SOSPECHOSO 4 s (§1.4).
+//  Controles (pinout arcade — ver config.h):
+//    Botón A (D0)  → abre el menú / avanza de página.
+//    Botón B (D10) → mueve el cursor dentro de una página.
+//    Botón C (D2)  → activa la opción resaltada (equivale al botón
+//                    de la palanca).
+//    Palanca        → arriba/abajo mueven el cursor; su pulsador activa.
+//    Sacudir/alzar (IMU) → siguen dando reacciones faciales.
+//    Inactividad: cada 10 min → cara SOSPECHOSO (§1.4).
 //
 //  Comandos seriales:
 //    h N       fuerza la hora; h -1 libera
@@ -21,8 +18,13 @@
 //    p         fuerza el portal WiFi
 //    i         imprime estado (incluye rasgos de personalidad)
 //    q         imprime rasgos + edad + factor de plasticidad
-//    q A G E P fija los 4 rasgos directamente (para pruebas)
+//    q A E     fija los dos ejes de personalidad (para pruebas)
 //    u         fuerza chequeo de auto-OTA inmediatamente
+//    n         alterna el menú
+//    1 / 2 / 3 simulan los botones A / B / C
+//    w x a d   palanca arriba/abajo/izquierda/derecha (stub sin hardware).
+//              Es w-x-a-d y no WASD porque 's' ya es el toggle de sonido.
+//    z         pulsador de la palanca
 // =============================================================
 
 #include <Arduino.h>
@@ -65,26 +67,17 @@ static uint8_t  ajustesSel = 0;  // opción resaltada en página 4 (0=Sonido,1=R
 
 static uint32_t    reaccionHasta   = 0;
 static const char* reaccionLabel   = "";
-static bool        reaccionEsTouch = false;
 
 static Expression  idleExprActual  = Expression::NEUTRAL;
 static uint32_t    proximoRonquido = 0;
 
-// ----- Cosquillas seguidas y malhumor (§1.2) ------------------
-static uint8_t  ticklesSeguidos = 0;
-static uint32_t ultimoTickle    = 0;
+// ----- Malhumor (§1.2) ----------------------------------------
+// Ya no lo disparan las cosquillas (el sensor de pie se retiró); ahora la
+// única fuente es sacudir el aparato de más (IMU).
 static uint32_t malhumorHasta   = 0;  // 0 = sin malhumor; > 0 = timestamp de expiración
 
-// ----- Bloqueo táctil tras presionar botón ----------------------
-static uint32_t ultimoBotonMs   = 0;  // timestamp del último BTN_A_PRESS
-
-// ----- Long-press del botón en menú página 3 -------------------
-static bool     btnPulsado       = false;  // botón está físicamente presionado
-static uint32_t btnPulsadoDesde  = 0;      // millis() cuando se detectó el press
-static bool     longPressEjecutado = false; // flag: ya se hizo el toggle, ignorar release
-
-// ----- Renacer: confirmación de doble toque en página 2 -------
-static bool     renacerConfirmando  = false; // esperando pie para confirmar
+// ----- Renacer: confirmación en página 4 ----------------------
+static bool     renacerConfirmando  = false; // esperando el botón C para confirmar
 static uint32_t renacerTimeoutHasta = 0;     // millis límite para confirmar
 
 // ----- Animación de nacimiento --------------------------------
@@ -98,7 +91,6 @@ static uint32_t randExprHasta  = 0;
 static bool     randExprActiva = false;
 
 // ----- Interacciones nocturnas (§1.3) --------------------------
-static uint32_t ultimaCariciaNoche = 0;  // millis de la última caricia nocturna
 static uint32_t caraNocheHasta     = 0;  // 0 = inactiva; > 0 = volver a DORMIDO cuando venza
 
 // ----- Inactividad y standby ----------------------------------
@@ -149,13 +141,12 @@ static void scanI2C() {
 
 // ------------------------------------------------------------
 static void reaccionar(Expression e, uint32_t duracionMs,
-                       const char* label, uint32_t ahora, bool esTouch = false) {
+                       const char* label, uint32_t ahora) {
     randExprActiva  = false;
     marcarActividad(ahora);
     face.setExpression(e);
     reaccionHasta   = ahora + duracionMs;
     reaccionLabel   = label;
-    reaccionEsTouch = esTouch;
     appState        = AppState::REACTING;
 }
 
@@ -285,7 +276,7 @@ static String responder(const char* q, Expression& rx) {
     }
     if (tiene(n,"enojado")||tiene(n,"enojada")||tiene(n,"bravo")||tiene(n,"enojas")) {
         bool mh = (malhumorHasta != 0) && ((int32_t)(millis() - malhumorHasta) < 0);
-        if (mh) { rx = Expression::ENOJADO; return "un poco! no me hagas mas cosquillas \xF0\x9F\x98\xA4"; }
+        if (mh) { rx = Expression::ENOJADO; return "un poco! no me sacudas tanto \xF0\x9F\x98\xA4"; }
         rx = Expression::FELIZ; return "nono, todo bien \xF0\x9F\x98\x8A";
     }
     if (tiene(n,"hora")) {
@@ -306,7 +297,7 @@ static String responder(const char* q, Expression& rx) {
         rx = Expression::RISA; return j[esp_random() % 3];
     }
     if (tiene(n,"te gusta")||tiene(n,"que te gusta")||tiene(n,"hobby")) {
-        rx = Expression::AMOR; return "me encantan las caricias y las cosquillas \xF0\x9F\x98\x84";
+        rx = Expression::AMOR; return "me encanta que juegues conmigo \xF0\x9F\x95\xB9\xEF\xB8\x8F";
     }
     if (tiene(n,"sonido")||tiene(n,"escuchas")||tiene(n,"mudo")||tiene(n,"volumen")) {
         rx = Expression::FELIZ; return sound.enabled() ? "el sonido esta prendido \xF0\x9F\x94\x8A"
@@ -326,8 +317,6 @@ static String responder(const char* q, Expression& rx) {
 // ------------------------------------------------------------
 static void entrarStandby() {
     randExprActiva     = false;
-    btnPulsado         = false;   // cancelar long-press pendiente
-    longPressEjecutado = false;
     renacerConfirmando = false;   // cancelar confirmación de renacer si estaba activa
     appState = AppState::STANDBY;
     u8g2.setPowerSave(1);
@@ -350,62 +339,42 @@ static void salirStandby(uint32_t ahora) {
 }
 
 // ------------------------------------------------------------
+// Clasificación de eventos usada por el menú: un pulso de "mover cursor"
+// puede venir del botón B o de la palanca; uno de "activar", del botón C
+// o del pulsador de la palanca. Así los dos caminos de control conviven
+// sin duplicar la lógica de cada página.
+static inline bool evMueveCursor(InputEvent ev) {
+    return ev == InputEvent::BTN_B_PRESS ||
+           ev == InputEvent::JOY_DOWN    || ev == InputEvent::JOY_UP;
+}
+static inline bool evActiva(InputEvent ev) {
+    return ev == InputEvent::BTN_C_PRESS || ev == InputEvent::JOY_SW_PRESS;
+}
+
 static void despacharEventos(uint32_t ahora) {
     InputEvent ev;
     while ((ev = input.nextEvent()) != InputEvent::NONE) {
 
-        // Standby: cualquier toque o botón despierta la pantalla
+        // Standby: cualquier botón o golpe de palanca despierta la pantalla
         if (appState == AppState::STANDBY) {
-            if (ev == InputEvent::BTN_A_PRESS) {
-                ultimoBotonMs = ahora;
-            }
             salirStandby(ahora);
             continue;
         }
 
-        // Dormido: el botón abre el menú (utilidad); caricia y cosquilla
-        // muestran una reacción facial breve sin cambiar appState (§1.3).
+        // Dormido: el botón A abre el menú (utilidad, no lo despierta);
+        // molestarlo con los otros controles da enojo nocturno (§1.3).
         if (appState == AppState::SLEEPING) {
             if (ev == InputEvent::BTN_A_PRESS) {
-                ultimoBotonMs = ahora;
                 appState  = AppState::MENU;
                 menuPagina = 1;  // reiniciar en página 1
                 ajustesSel = 0;
                 menuHasta = ahora + MENU_TIMEOUT_MS;
                 sound.play(Melody::BIP);
-            } else if (ev == InputEvent::TOUCH_START) {
-                // Ignorar touch si estamos en lockout del botón
-                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
-                    Serial.println("[app] touch ignorado (lockout boton)");
-                } else {
-                    bool dentroDeVentana = (ahora - ultimaCariciaNoche) <= CARICIA_NOCHE_VENTANA_MS
-                                           && ultimaCariciaNoche != 0;
-                    if (!dentroDeVentana) {
-                        // 1.ª caricia: cara FELIZ sin despertar
-                        ultimaCariciaNoche = ahora;
-                        face.setExpression(Expression::FELIZ);
-                        caraNocheHasta = ahora + REACCION_NOCHE_FELIZ_MS;
-                    } else {
-                        // 2.ª caricia dentro de la ventana: enojo nocturno.
-                        // Renueva la ventana: seguir acariciando lo sigue enojando.
-                        ultimaCariciaNoche = ahora;
-                        personality.event(PersEvent::ENOJO_NOCTURNO);
-                        face.setExpression(Expression::ENOJADO);
-                        sound.play(Melody::ENOJADO);
-                        caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
-                    }
-                }
-            } else if (ev == InputEvent::TICKLE_START) {
-                // Ignorar tickle si estamos en lockout del botón
-                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
-                    Serial.println("[app] touch ignorado (lockout boton)");
-                } else {
-                    // Cosquilla durmiendo: enojo nocturno directo
-                    personality.event(PersEvent::ENOJO_NOCTURNO);
-                    face.setExpression(Expression::ENOJADO);
-                    sound.play(Melody::ENOJADO);
-                    caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
-                }
+            } else {
+                personality.event(PersEvent::ENOJO_NOCTURNO);
+                face.setExpression(Expression::ENOJADO);
+                sound.play(Melody::ENOJADO);
+                caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
             }
             continue;
         }
@@ -416,32 +385,26 @@ static void despacharEventos(uint32_t ahora) {
             // ── Overlay de confirmación de renacer: intercepta todo ──
             if (renacerConfirmando) {
                 if (ev == InputEvent::BTN_A_PRESS) {
-                    ultimoBotonMs = ahora;
                     renacerConfirmando = false;
                     sound.play(Melody::BIP);
                     menuHasta = ahora + MENU_TIMEOUT_MS;
-                    Serial.println("[app] renacer cancelado (boton)");
-                } else if (ev == InputEvent::TICKLE_START) {
-                    bool enLockout = (ultimoBotonMs != 0) &&
-                                     ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
-                    if (!enLockout) {
-                        // Segundo toque (pie): CONFIRMAR renacer
-                        renacerConfirmando = false;
-                        time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
-                        personality.renacer(nowEpoch);
-                        mood.reset();
-                        menuPagina = 1;
-                        ajustesSel = 0;
-                        dispararNacimiento(ahora);
-                        Serial.println("[app] renacer CONFIRMADO — animacion nacimiento");
-                    }
+                    Serial.println("[app] renacer cancelado (boton A)");
+                } else if (evActiva(ev)) {
+                    // Segunda pulsación deliberada: CONFIRMAR renacer
+                    renacerConfirmando = false;
+                    time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
+                    personality.renacer(nowEpoch);
+                    mood.reset();
+                    menuPagina = 1;
+                    ajustesSel = 0;
+                    dispararNacimiento(ahora);
+                    Serial.println("[app] renacer CONFIRMADO — animacion nacimiento");
                 }
-                // TOUCH (cabeza) se ignora durante la confirmación
+                // El resto de los eventos se ignora durante la confirmación
                 continue;
             }
 
             if (ev == InputEvent::BTN_A_PRESS) {
-                ultimoBotonMs = ahora;
                 if (menuPagina < 4) {
                     // Avanzar de página
                     menuPagina++;
@@ -457,14 +420,11 @@ static void despacharEventos(uint32_t ahora) {
                     entroADormirMs = ahora;
                 }
             } else {
-                // Acciones táctiles según la página (con lockout tras botón)
-                bool enLockout = (ultimoBotonMs != 0) &&
-                                 ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS);
-                if (enLockout) {
-                    Serial.println("[app] touch ignorado (lockout boton, menu)");
-                } else if (menuPagina == 3) {
-                    // Página 3: pie instala la actualización OTA (si hay)
-                    if (ev == InputEvent::TICKLE_START && ota.hayActualizacion()) {
+                // Acciones según la página: B (o la palanca) mueve el cursor,
+                // C (o el pulsador de la palanca) activa.
+                if (menuPagina == 3) {
+                    // Página 3: activar instala la actualización OTA (si hay)
+                    if (evActiva(ev) && ota.hayActualizacion()) {
                         sound.play(Melody::BIP);
                         ota.instalarAhora();
                         // Si vuelve acá, la instalación falló: cerrar limpio
@@ -475,12 +435,14 @@ static void despacharEventos(uint32_t ahora) {
                         entroADormirMs = ahora;
                     }
                 } else if (menuPagina == 4) {
-                    // Página 4 (Ajustes): cabeza mueve el cursor, pie activa.
-                    if (ev == InputEvent::TOUCH_START) {
-                        ajustesSel = (ajustesSel + 1) % 3;
+                    // Página 4 (Ajustes): cursor y activación.
+                    if (evMueveCursor(ev)) {
+                        // Arriba retrocede, abajo/botón B avanzan (3 opciones)
+                        if (ev == InputEvent::JOY_UP) ajustesSel = (ajustesSel + 2) % 3;
+                        else                          ajustesSel = (ajustesSel + 1) % 3;
                         sound.play(Melody::BIP);
                         menuHasta = ahora + MENU_TIMEOUT_MS;
-                    } else if (ev == InputEvent::TICKLE_START) {
+                    } else if (evActiva(ev)) {
                         menuHasta = ahora + MENU_TIMEOUT_MS;
                         if (ajustesSel == 0) {
                             // Sonido on/off
@@ -493,7 +455,7 @@ static void despacharEventos(uint32_t ahora) {
                             renacerConfirmando  = true;
                             renacerTimeoutHasta = ahora + MENU_RENACER_CONFIRM_MS;
                             sound.play(Melody::BIP);
-                            Serial.println("[app] renacer: aguardando confirmacion (pie=si, btn=no)");
+                            Serial.println("[app] renacer: aguardando confirmacion (C=si, A=no)");
                         } else {
                             // Cambiar WiFi: cerrar menú y abrir portal
                             appState = AppState::IDLE;
@@ -524,98 +486,41 @@ static void despacharEventos(uint32_t ahora) {
             face.setExpression(idleExprActual);
             marcarActividad(ahora);
             entroADormirMs = ahora;
-            ultimoBotonMs  = ahora;   // lockout: que el mismo toque no dispare otra acción
             sound.play(Melody::BIP);
             continue;
         }
 
-        switch (ev) {
-            case InputEvent::BTN_A_PRESS:
-                ultimoBotonMs = ahora;
-                marcarActividad(ahora);
-                randExprActiva  = false;
-                appState  = AppState::MENU;
-                menuPagina = 1;  // reiniciar en página 1
-                ajustesSel = 0;
-                menuHasta = ahora + MENU_TIMEOUT_MS;
-                sound.play(Melody::BIP);
-                break;
-
-            case InputEvent::TOUCH_START: {
-                // Ignorar touch si estamos en lockout del botón
-                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
-                    Serial.println("[app] touch ignorado (lockout boton)");
-                } else {
-                    bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
-                    mood.apply(MoodEffect::CARICIA);
-                    personality.event(PersEvent::CARICIA);
-                    sound.play(Melody::AMOR);
-                    if (enMalhumor) {
-                        // Perdona: corta el tiempo restante a la mitad (§1.2)
-                        uint32_t restante = malhumorHasta - ahora;
-                        malhumorHasta = ahora + restante / 2;
-                    }
-                    reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora, true);
-                }
-                break;
-            }
-
-            case InputEvent::TICKLE_START: {
-                // Ignorar tickle si estamos en lockout del botón
-                if ((ahora - ultimoBotonMs) < TOUCH_LOCKOUT_BOTON_MS && ultimoBotonMs != 0) {
-                    Serial.println("[app] touch ignorado (lockout boton)");
-                } else {
-                    bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
-                    if (enMalhumor) {
-                        // Durante malhumor: renueva el enojo, extiende el malhumor (§1.2)
-                        // El tiempo de malhumor es dinámico según personalidad
-                        malhumorHasta = ahora + personality.malhumorMs();
-                        personality.event(PersEvent::ENOJO_COSQUILLAS);
-                        sound.play(Melody::ENOJADO);
-                        reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "", ahora);
-                        // No aplicar mood positivo; no incrementar ticklesSeguidos
-                    } else {
-                        marcarActividad(ahora);
-                        if ((ahora - ultimoTickle) > TICKLE_VENTANA_MS) {
-                            ticklesSeguidos = 0;
-                        }
-                        ticklesSeguidos++;
-                        ultimoTickle = ahora;
-
-                        // Límite dinámico: 2 cosquillas si gruñón alto, 3 en otro caso
-                        if (ticklesSeguidos >= personality.tickleMax()) {
-                            ticklesSeguidos = 0;
-                            malhumorHasta = ahora + personality.malhumorMs();  // malhumor dinámico (§1.2)
-                            mood.apply(MoodEffect::COSQUILLAS_SEGUIDAS);
-                            personality.event(PersEvent::ENOJO_COSQUILLAS);
-                            sound.play(Melody::ENOJADO);
-                            reaccionar(Expression::ENOJADO, REACCION_BTN_MS, "", ahora);
-                        } else {
-                            mood.apply(MoodEffect::COSQUILLAS);
-                            personality.event(PersEvent::COSQUILLAS_OK);
-                            sound.play(Melody::RISA);  // carcajada ja-ja-ja
-                            reaccionar(Expression::RISA, REACCION_TICKLE_MS, "", ahora);
-                        }
-                    }
-                }
-                break;
-            }
-
-            default:
-                break;
+        // ── IDLE / REACTING ──────────────────────────────────────
+        // El botón A abre el menú. El resto de los controles todavía no
+        // tiene destino: van a ser la entrada al arcade (menú de juegos),
+        // que es el próximo paso. Por ahora solo cuentan como actividad,
+        // así el toy no se va a standby mientras lo estás usando.
+        if (ev == InputEvent::BTN_A_PRESS) {
+            marcarActividad(ahora);
+            randExprActiva  = false;
+            appState   = AppState::MENU;
+            menuPagina = 1;  // reiniciar en página 1
+            ajustesSel = 0;
+            menuHasta  = ahora + MENU_TIMEOUT_MS;
+            sound.play(Melody::BIP);
+        } else {
+            marcarActividad(ahora);
         }
     }
 }
 
 // ------------------------------------------------------------
 static void imprimirEstado() {
-    Serial.printf("[info] FW %s | estado:%d | F:%u E:%u A:%u | hora:%d noche:%d horaValida:%d portal:%d | sonido:%d | touch:%lu/%lu pie:%lu/%lu\n",
+    Serial.printf("[info] FW %s | estado:%d | F:%u E:%u A:%u | hora:%d noche:%d horaValida:%d portal:%d | sonido:%d\n",
                   FW_VERSION, (int)appState,
                   mood.happiness(), mood.energy(), mood.boredom(),
                   net.hourNow(), net.isNight(), net.timeValid(), net.portalActive(),
-                  sound.enabled(),
-                  (unsigned long)input.touchValue(),    (unsigned long)input.touchBaseline(),
-                  (unsigned long)input.touchValuePie(), (unsigned long)input.touchBaselinePie());
+                  sound.enabled());
+    Serial.printf("[joy] %s | X:%u(c%u)=%.2f Y:%u(c%u)=%.2f | btn A:%d B:%d C:%d SW:%d\n",
+                  input.joystickPresente() ? "hw" : "stub",
+                  input.rawX(), input.centroX(), input.axisX(),
+                  input.rawY(), input.centroY(), input.axisY(),
+                  input.btnA(), input.btnB(), input.btnC(), input.joySw());
     Serial.printf("[pers] animo:%u energia:%u | edad:%d dias | factor:%.2f\n",
                   personality.animo(), personality.energia(),
                   personality.edadDias(), personality.plasticidadFactor());
@@ -668,6 +573,25 @@ static void procesarComando(const char* cmd) {
         // Forzar chequeo de auto-OTA inmediatamente
         ota.forzarChequeo();
         Serial.println("[cmd] chequeo OTA forzado");
+    } else if (cmd[0] == 'w' || cmd[0] == 'x' || cmd[0] == 'a' || cmd[0] == 'd') {
+        // Stub de la palanca mientras no esté el módulo físico: cada tecla
+        // es un golpe que vuelve solo al centro (ver Input::setStubAxis).
+        uint32_t ahora = millis();
+        switch (cmd[0]) {
+            case 'w': input.setStubAxis( 0.0f, -1.0f, ahora); break;  // arriba
+            case 'x': input.setStubAxis( 0.0f,  1.0f, ahora); break;  // abajo
+            case 'a': input.setStubAxis(-1.0f,  0.0f, ahora); break;  // izquierda
+            case 'd': input.setStubAxis( 1.0f,  0.0f, ahora); break;  // derecha
+        }
+        Serial.printf("[cmd] palanca stub: %c\n", cmd[0]);
+    } else if (cmd[0] == '1' || cmd[0] == '2' || cmd[0] == '3' || cmd[0] == 'z') {
+        // Botones por serial: sirve para probar sin tenerlos cableados.
+        InputEvent ev = (cmd[0] == '1') ? InputEvent::BTN_A_PRESS  :
+                        (cmd[0] == '2') ? InputEvent::BTN_B_PRESS  :
+                        (cmd[0] == '3') ? InputEvent::BTN_C_PRESS  :
+                                          InputEvent::JOY_SW_PRESS;
+        input.injectEvent(ev);
+        Serial.printf("[cmd] boton simulado: %c\n", cmd[0]);
     }
 }
 
@@ -723,6 +647,7 @@ void setup() {
     sigMuestraPers = ahora + MOOD_TICK_MS / TIME_SCALE;
 
     Serial.println("[app] listo — comandos: h N | m F E A | s | p | i | n | q | q A E | u (OTA)");
+    Serial.println("[app] test de controles: 1/2/3 = botones A/B/C | z = pulsador palanca | w/x/a/d = palanca");
 }
 
 // ------------------------------------------------------------
@@ -834,7 +759,7 @@ void loop() {
                 personality.event(PersEvent::CARICIA);
                 if (appState == AppState::IDLE || appState == AppState::REACTING) {
                     sound.play(Melody::AMOR);
-                    reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora, true);
+                    reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora);
                 }
                 break;
             case Telegram::Cmd::SONIDO:
@@ -1017,10 +942,9 @@ void loop() {
         }
     }
 
-    // Expiración del malhumor: resetea el contador de cosquillas (§1.2)
+    // Expiración del malhumor (§1.2)
     if (malhumorHasta != 0 && (int32_t)(ahora - malhumorHasta) >= 0) {
-        malhumorHasta   = 0;
-        ticklesSeguidos = 0;
+        malhumorHasta = 0;
     }
 
     // Cara nocturna transitoria: volver a DORMIDO cuando venza (§1.3)
@@ -1062,9 +986,6 @@ void loop() {
         face.setExpression(idleExprActual);
         marcarActividad(ahora);
         entroADormirMs  = ahora;  // después del menú, 30 min antes de standby
-        // Limpiar estado de long-press si el menú expiró con botón en p3
-        btnPulsado         = false;
-        longPressEjecutado = false;
     }
 
     // Transiciones dependientes de la hora
@@ -1183,9 +1104,7 @@ void loop() {
     // Fin de reacción
     if (appState == AppState::REACTING) {
         bool vencida = (int32_t)(ahora - reaccionHasta) >= 0;
-        if (reaccionEsTouch && input.touching())
-            reaccionHasta = ahora + 500;
-        else if (vencida) {
+        if (vencida) {
             reaccionLabel = "";
             if (esNoche) {
                 entrarADormir(ahora);
@@ -1311,11 +1230,10 @@ void loop() {
         ultimoLog = ahora;
         fpsActual = framesEnVentana * 1000 / INTERVALO_LOG_MS;
         framesEnVentana = 0;
-        Serial.printf("Ramoncito | fps:%lu heap:%lu | F:%u E:%u A:%u | hora:%d noche:%d | est:%d | tc:%lu/%lu tp:%lu/%lu\n",
+        Serial.printf("Ramoncito | fps:%lu heap:%lu | F:%u E:%u A:%u | hora:%d noche:%d | est:%d | joy:%.2f,%.2f\n",
                       (unsigned long)fpsActual, (unsigned long)ESP.getFreeHeap(),
                       mood.happiness(), mood.energy(), mood.boredom(),
                       net.hourNow(), esNoche, (int)appState,
-                      (unsigned long)input.touchValue(),    (unsigned long)input.touchBaseline(),
-                      (unsigned long)input.touchValuePie(), (unsigned long)input.touchBaselinePie());
+                      input.axisX(), input.axisY());
     }
 }

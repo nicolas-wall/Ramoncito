@@ -1,6 +1,8 @@
 # 01 — Hardware del Ramoncito
 
-> Documento 1 de la serie de planificación de Ramoncito — mascota virtual tipo Tamagotchi con cara OLED montada en cuerpo impreso en 3D, basada en Seeed Studio XIAO ESP32-S3.
+> Documento 1 de la serie de planificación de Ramoncito — **mini arcade** con pantalla OLED, palanca y botones, en cuerpo impreso en 3D, basado en Seeed Studio XIAO ESP32-S3.
+>
+> **Cambio de rumbo (v0.10):** el proyecto arrancó como mascota tipo Tamagotchi con dos sensores táctiles (caricia y cosquillas). Ahora es un mini arcade: los dos pines de touch pasaron a la palanca y a un botón, y la mascota queda como cara de reposo del gabinete. Lo que sigue describe el hardware **del arcade**.
 
 ---
 
@@ -10,11 +12,15 @@
 |---|---|---|---|
 | Seeed Studio XIAO ESP32-S3 (básico, no Sense) | 1 | Tengo | — |
 | OLED 1.54" 128×64 I2C (SSD1309) | 1 | Tengo | — |
-| Pulsador / botón táctil momentáneo | 2 | Tengo | — |
+| Pulsador / botón táctil momentáneo | 2–3 | Tengo | — |
+| Buzzer pasivo (tipo KY-006 o equivalente de kit Arduino) | 1 | Tengo | — |
+| IMU MPU6050 (GY-521) | 1 | Tengo | — |
 | Cables y protoboard | — | Tengo | — |
-| Buzzer pasivo (tipo KY-006 o equivalente de kit Arduino) | 1 | **A comprar** | ~USD 1 |
-| **Opcional v2:** IMU MPU6050 | 1 | Futuro | ~USD 2 |
-| **Opcional v2:** Batería LiPo 3.7 V (400–600 mAh) | 1 | Futuro | ~USD 5 |
+| **Palanca analógica KY-023** (thumbstick tipo PS2, 2 ejes + pulsador) | 1 | **A comprar** | ~USD 1–2 |
+| **Opcional:** botones arcade de 16 mm (tacto real) | 2–3 | Futuro | ~USD 0.5 c/u |
+| **Opcional:** Batería LiPo 3.7 V (400–600 mAh) | 1 | Futuro | ~USD 5 |
+
+Los dos tact switch que ya había alcanzan para jugar: la palanca es lo único que falta comprar.
 
 ---
 
@@ -23,24 +29,30 @@
 ```
                     XIAO ESP32-S3
                    ┌─────────────┐
-              GND ─┤ GND     3V3 ├─ VCC (OLED)
+              GND ─┤ GND     3V3 ├─ VCC (OLED + palanca)
                    │             │
-      Botón A ─── ┤ D0 (GPIO1)  │
-      Botón B ─── ┤ D1 (GPIO2)  │
-   Touch (cobre) ─┤ D2 (GPIO3)  │
+      Botón A ──── ┤ D0 (GPIO1)  │
+   Palanca VRx ─── ┤ D1 (GPIO2)  │  (ADC1_CH1)
+      Botón C ──── ┤ D2 (GPIO3)  │
                    │             │
-   Buzzer (+) ─── ┤ D3 (GPIO4) ─┤── [~100Ω] ──► Buzzer ──► GND
+   Buzzer (+) ──── ┤ D3 (GPIO4) ─┤── [~100Ω] ──► Buzzer ──► GND
                    │             │
-      OLED SDA ── ┤ D4 (GPIO5)  │
-      OLED SCL ── ┤ D5 (GPIO6)  │
+      OLED SDA ─── ┤ D4 (GPIO5)  │
+      OLED SCL ─── ┤ D5 (GPIO6)  │
+                   │             │
+   Palanca SW ──── ┤ D8 (GPIO7)  │
+   Palanca VRy ─── ┤ D9 (GPIO8)  │  (ADC1_CH7)
+      Botón B ──── ┤ D10 (GPIO9) │
                    │             │
                    │    USB-C    │ ◄── alimentación / programación
                    └─────────────┘
 
-Botones:
-  [BTN A] ── D0 (GPIO1) ──┐
-  [BTN B] ── D1 (GPIO2) ──┘ (el otro terminal de cada botón va a GND)
-  Pull-up interno habilitado por software (INPUT_PULLUP), sin resistencia externa.
+Botones (los tres iguales):
+  [BTN] ── pin del XIAO
+  [BTN] ── GND
+  Pull-up interno por software (INPUT_PULLUP), sin resistencia externa.
+  Un pin sin botón cableado queda en HIGH = suelto, así que se pueden
+  montar de a uno sin tocar el firmware.
 
 OLED 4 pines:
   GND ── GND del XIAO
@@ -48,8 +60,12 @@ OLED 4 pines:
   SCL ── D5 (GPIO6)
   SDA ── D4 (GPIO5)
 
-Touch:
-  Cinta/cable de cobre ── D2 (GPIO3)   (sensado capacitivo nativo del ESP32-S3)
+Palanca KY-023 (5 pines):
+  GND ── GND del XIAO
+  +5V ── 3V3 del XIAO   ← 3.3 V, NO 5 V (ver §4.3)
+  VRx ── D1  (GPIO2)
+  VRy ── D9  (GPIO8)
+  SW  ── D8  (GPIO7)
 ```
 
 ---
@@ -59,11 +75,18 @@ Touch:
 | Componente | Pin XIAO | GPIO real | Nota |
 |---|---|---|---|
 | Botón A | D0 | GPIO1 | a GND, `INPUT_PULLUP` interno, sin resistencia externa |
-| Botón B | D1 | GPIO2 | ídem |
-| Touch caricia | D2 | GPIO3 | cable/cinta de cobre, sensado capacitivo nativo ESP32-S3 |
+| Palanca eje X | D1 | GPIO2 | analógico, **ADC1**_CH1 |
+| Botón C / START | D2 | GPIO3 | a GND, `INPUT_PULLUP`. Pin de strapping: ver nota abajo |
 | Buzzer pasivo | D3 | GPIO4 | PWM LEDC, resistencia ~100 Ω en serie recomendada |
 | OLED SDA | D4 | GPIO5 | I2C por defecto del XIAO |
 | OLED SCL | D5 | GPIO6 | I2C por defecto del XIAO |
+| Pulsador de la palanca | D8 | GPIO7 | a GND, `INPUT_PULLUP` |
+| Palanca eje Y | D9 | GPIO8 | analógico, **ADC1**_CH7 |
+| Botón B | D10 | GPIO9 | a GND, `INPUT_PULLUP` |
+
+**Por qué los ejes van sí o sí a ADC1:** el ESP32-S3 le presta el ADC2 al driver de WiFi. Con el WiFi levantado —que acá es siempre, por OTA, panel LAN y Telegram— las lecturas de ADC2 fallan o devuelven basura. ADC1 son los GPIO1 a GPIO10, y ahí están GPIO2 y GPIO8.
+
+**Por qué GPIO3 lleva un botón y no un eje:** GPIO3 es pin de strapping del ESP32-S3 (selección de JTAG). Con los eFuses de fábrica se ignora al bootear, así que es utilizable; pero un botón con pull-up queda en HIGH durante el arranque, que es un nivel lógico definido, mientras que un eje analógico en reposo queda a media tensión. Entre los dos, el botón es la opción segura.
 
 ---
 
@@ -107,43 +130,45 @@ for (byte addr = 1; addr < 127; addr++) {
 
 ---
 
-### 4.2 Botones A y B
+### 4.2 Botones A, B y C
 
-Dos pulsadores momentáneos estándar (tipo tact switch).
+Tres pulsadores momentáneos estándar (tipo tact switch). Los dos que ya había alcanzan para empezar; el tercero es opcional (START / coin).
 
 **Conexión:** un terminal al pin GPIO correspondiente, el otro terminal a GND. Sin resistencia externa.
 
 **Configuración en firmware:**
 ```cpp
-pinMode(GPIO1, INPUT_PULLUP);  // Botón A
-pinMode(GPIO2, INPUT_PULLUP);  // Botón B
+pinMode(PIN_BTN_A,  INPUT_PULLUP);  // GPIO1
+pinMode(PIN_BTN_B,  INPUT_PULLUP);  // GPIO9
+pinMode(PIN_BTN_C,  INPUT_PULLUP);  // GPIO3
+pinMode(PIN_JOY_SW, INPUT_PULLUP);  // GPIO7
 ```
 
-Con `INPUT_PULLUP`, el pin lee HIGH en reposo y LOW cuando el botón está presionado.
+Con `INPUT_PULLUP`, el pin lee HIGH en reposo y LOW cuando el botón está presionado. Un pin sin nada conectado también lee HIGH, así que los botones se pueden ir montando de a uno.
 
-**Debounce:** por software, con un filtro de tiempo mínimo entre lecturas (típicamente 20–50 ms). No se necesita capacitor externo.
+**Debounce:** por software, `DEBOUNCE_MS = 30`. No se necesita capacitor externo.
+
+**Tacto:** los tact switch de 6 × 6 mm sirven para probar todo el firmware, pero se sienten a protoboard. Para tacto de arcade real, botones de 16 mm — los de 24 mm quedan enormes al lado de una pantalla de 1.54".
 
 ---
 
-### 4.3 Touch capacitivo — caricia
+### 4.3 Palanca analógica (KY-023 / thumbstick tipo PS2)
 
-El ESP32-S3 tiene sensado capacitivo nativo en varios pines. GPIO3 (D2 en el XIAO) es uno de los pines touch disponibles.
+Adentro son dos potenciómetros de ~10 kΩ montados en cruz, más un pulsador que se activa al apretar la palanca hacia abajo. Cada potenciómetro es un divisor de tensión: entrega de 0 V a VCC según la posición, con el reposo cerca de la mitad.
 
-**Cómo funciona:** el ESP32-S3 mide el tiempo de carga de un capacitor interno conectado al pin. Cuando un dedo (o una superficie conductora conectada) se acerca, la capacitancia del pin aumenta y el valor leído cambia. La función de lectura es:
+**Alimentar a 3.3 V, no a 5 V.** El módulo dice "+5V" en la serigrafía, pero no tiene electrónica activa: son resistencias, y funcionan igual a 3.3 V. Es más: *hay que* alimentarlo a 3.3 V, porque el ADC del ESP32-S3 no tolera entradas por encima de 3.3 V. A 5 V los extremos del recorrido meterían ~5 V en un pin del micro.
 
-```cpp
-uint32_t valor = touchRead(GPIO3);
-```
+**Rango de lectura:** con `analogReadResolution(12)` y atenuación de 11 dB, el ADC devuelve 0..4095 sobre el rango completo de 3.3 V.
 
-**OJO — comportamiento del ESP32-S3** (verificado en hardware): a diferencia del ESP32 original (donde el valor cae al tocar), en el S3 `touchRead()` devuelve valores grandes (~38000 en este hardware) que **AUMENTAN al tocar**. La detección es `valor > baseline × 1.15`. El umbral exacto depende del hardware montado y hay que calibrarlo.
+**Calibración del centro:** ninguna unidad reposa exactamente en 2048, y la diferencia varía entre ejes de la misma palanca. El firmware promedia `JOY_MUESTRAS_CALIB` lecturas al bootear y guarda ese valor como centro. **No hay que tocar la palanca durante el arranque.**
 
-**Cómo armar el sensor:**
+**Zona muerta:** los thumbsticks baratos no vuelven siempre al mismo punto. Sin zona muerta, un eje en reposo queda oscilando y el control deriva solo. `JOY_DEADZONE = 0.18` (18 % del recorrido) ignora ese ruido, y el valor se reescala para que apenas se sale de la zona muerta el control arranque en 0 y no pegue un salto.
 
-- Material conductor (cinta de cobre adhesiva, cinta de aluminio, o un cable en espiral) pegado por dentro del cuerpo 3D, en la zona de caricia.
-- Un cable fino conecta ese parche conductor al pin D2 (GPIO3).
-- El ESP32-S3 detecta la proximidad/contacto del dedo **a través del plástico**, siempre que la pared sea de 1 a 2 mm de grosor aproximadamente. Paredes más gruesas pueden requerir ajuste del umbral o reducir la sensibilidad hasta hacerlo inoperable.
+**De eje analógico a dirección:** los juegos usan el valor continuo (`axisX()` / `axisY()`, −1 a +1) para control proporcional. Los menús usan eventos discretos, generados con histéresis: la dirección se activa al superar `JOY_UMBRAL_ON` (0.50) y no se suelta hasta bajar de `JOY_UMBRAL_OFF` (0.35). Sin histéresis, una palanca sostenida justo en el umbral dispara un tren de eventos. Mantenerla genera auto-repeat: primero espera `JOY_REPEAT_DELAY_MS`, después repite cada `JOY_REPEAT_MS`.
 
-**Calibración:** el umbral de detección varía según el área del parche, el grosor del plástico y la humedad ambiental. Se planea una autocalibración al boot: el firmware toma N muestras en reposo y calcula el umbral dinámicamente.
+**Si un eje va al revés:** invertirlo por firmware con `JOY_INVERTIR_X` / `JOY_INVERTIR_Y` en `config.h`. No hace falta recablear ni tocar la lógica de los juegos.
+
+**Tamaño para el gabinete:** PCB de 26 × 34 mm, palanca de ~20 mm de alto. Al lado del OLED de 1.54" (módulo de 42 × 38 mm) da una proporción de arcade correcta.
 
 ---
 
@@ -186,6 +211,7 @@ La resistencia de 100 Ω en serie limita la corriente y protege el pin. El buzze
 | XIAO ESP32-S3 (activo normal) | 40–80 mA |
 | OLED 128×64 | 15–25 mA |
 | Buzzer pasivo (activo) | 5–15 mA |
+| Palanca (2 divisores de 10 kΩ a 3.3 V) | < 1 mA |
 | Total estimado | < 100 mA |
 
 Bien dentro del límite del regulador onboard del XIAO y de la corriente de un puerto USB estándar.
@@ -202,14 +228,15 @@ Al diseñar o modelar el cuerpo del Ramoncito, tener en cuenta los siguientes pu
 - Ventana rectangular de 28 × 28 mm aprox. (o ajustar al tamaño real del panel activo) en la cara frontal.
 - El módulo OLED se apoya desde atrás con tolerancia de 0.2–0.3 mm. Puede fijarse con pegamento UV o encastre de fricción.
 
-**Botones A y B:**
-- Agujeros o canales en el cuerpo para que el émbolo de cada pulsador sea accesible desde el exterior.
+**Botones A, B y C:**
+- Agujeros o canales en el panel para que el émbolo de cada pulsador sea accesible desde el exterior.
 - Separación mínima entre botones: 10–12 mm para que sean cómodos de presionar.
+- Disposición de arcade: los botones a la derecha del panel, la palanca a la izquierda.
 
-**Touch capacitivo:**
-- Zona de pared delgada (1–2 mm) en el área de "caricia" (lomo o lateral del cuerpo).
-- El parche conductor (cinta de cobre o aluminio) se pega por dentro de esa zona durante el ensamble.
-- Evitar pintura metálica o relleno conductor en esa zona (interfiere con el sensado).
+**Palanca:**
+- Ventana para la base del módulo (PCB de 26 × 34 mm) y un agujero para el vástago, con holgura suficiente para el recorrido completo en las cuatro direcciones.
+- El módulo se atornilla o se pega desde adentro; el vástago tiene que sobresalir del panel lo suficiente para agarrarlo con dos dedos.
+- Dejar el panel con un ángulo de 10–20° (como un control de arcade real) hace la palanca mucho más cómoda que un panel plano.
 
 **Buzzer:**
 - El buzzer es omnidireccional pero gana volumen con una pequeña cámara acústica detrás del diafragma.
