@@ -104,6 +104,17 @@ static uint32_t standbyGraciaHasta = 0;  // bloquea la transición a dormir tras
 // pero solo durante IDLE (despierto o siesta). El sueño nocturno no cuenta.
 static uint32_t sigMuestraPers = 0;
 
+// ----- Diagnóstico de pines (comandos 'k' y 'v') ---------------
+// Todos los pines del XIAO que no usan el OLED, el buzzer ni el LED.
+static const uint8_t PIN_DIAG[]        = {  1,    2,    3,    7,    8,    9,   43,   44 };
+static const char*   PIN_DIAG_ETIQ[]   = {"D0", "D1", "D2", "D8", "D9","D10", "D6", "D7"};
+static const uint8_t PIN_DIAG_N        = sizeof(PIN_DIAG);
+// Modo vigilancia: muestrea en CADA vuelta del loop (no una vez por frame)
+// e imprime solo cuando un pin cambia de nivel. A diferencia de 'k', que se
+// consulta desde afuera, esto no se puede perder una pulsación corta.
+static bool    pinWatch = false;
+static uint8_t pinWatchPrev[8];
+
 // ----- Estado varios ------------------------------------------
 static uint32_t ultimoLog = 0, ultimoFrame = 0;
 static uint32_t framesEnVentana = 0, fpsActual = 0;
@@ -583,17 +594,29 @@ static void procesarComando(const char* cmd) {
         // el que aparezca en 0 mientras lo mantenés apretado es ese.
         // Se saltean los ejes de la palanca si está montada, para no pisar
         // el ADC con un pull-up.
-        static const uint8_t cand[]   = {  1,    2,    3,    7,    8,    9,   43,   44 };
-        static const char*   etiq[]   = {"D0", "D1", "D2", "D8", "D9","D10", "D6", "D7"};
         char linea[192];
         int n = snprintf(linea, sizeof(linea), "[scan]");
-        for (uint8_t i = 0; i < sizeof(cand) && n > 0 && n < (int)sizeof(linea); i++) {
-            if (JOYSTICK_PRESENTE && (cand[i] == PIN_JOY_X || cand[i] == PIN_JOY_Y)) continue;
-            pinMode(cand[i], INPUT_PULLUP);
+        for (uint8_t i = 0; i < PIN_DIAG_N && n > 0 && n < (int)sizeof(linea); i++) {
+            if (JOYSTICK_PRESENTE && (PIN_DIAG[i] == PIN_JOY_X || PIN_DIAG[i] == PIN_JOY_Y)) continue;
+            pinMode(PIN_DIAG[i], INPUT_PULLUP);
             n += snprintf(linea + n, sizeof(linea) - n, " %s/g%u:%d",
-                          etiq[i], cand[i], digitalRead(cand[i]));
+                          PIN_DIAG_ETIQ[i], PIN_DIAG[i], digitalRead(PIN_DIAG[i]));
         }
         Serial.println(linea);
+    } else if (cmd[0] == 'v') {
+        // Modo vigilancia on/off. Con esto no hace falta acertarle al momento
+        // de la pulsación: cualquier flanco en cualquier pin queda impreso.
+        pinWatch = !pinWatch;
+        if (pinWatch) {
+            for (uint8_t i = 0; i < PIN_DIAG_N; i++) {
+                if (JOYSTICK_PRESENTE && (PIN_DIAG[i] == PIN_JOY_X || PIN_DIAG[i] == PIN_JOY_Y)) continue;
+                pinMode(PIN_DIAG[i], INPUT_PULLUP);
+                pinWatchPrev[i] = (uint8_t)digitalRead(PIN_DIAG[i]);
+            }
+            Serial.println("[watch] ON — vigilando todos los pines libres, apreta lo que quieras");
+        } else {
+            Serial.println("[watch] OFF");
+        }
     } else if (cmd[0] == 'w' || cmd[0] == 'x' || cmd[0] == 'a' || cmd[0] == 'd') {
         // Stub de la palanca mientras no esté el módulo físico: cada tecla
         // es un golpe que vuelve solo al centro (ver Input::setStubAxis).
@@ -677,6 +700,22 @@ void loop() {
 
     input.poll(ahora);
     leerSerial();
+
+    // Vigilancia de pines: corre antes del gate de frame, así muestrea a la
+    // velocidad del loop (miles de veces por segundo) y no se le escapa una
+    // pulsación corta. Solo imprime cuando algo cambia.
+    if (pinWatch) {
+        for (uint8_t i = 0; i < PIN_DIAG_N; i++) {
+            if (JOYSTICK_PRESENTE && (PIN_DIAG[i] == PIN_JOY_X || PIN_DIAG[i] == PIN_JOY_Y)) continue;
+            uint8_t nivel = (uint8_t)digitalRead(PIN_DIAG[i]);
+            if (nivel != pinWatchPrev[i]) {
+                pinWatchPrev[i] = nivel;
+                Serial.printf("[watch] %s/g%u -> %s\n",
+                              PIN_DIAG_ETIQ[i], PIN_DIAG[i],
+                              nivel ? "SUELTO (1)" : "APRETADO (0)");
+            }
+        }
+    }
 
     // (El LED de latido de la Etapa 0 quedó desactivado a pedido del
     //  usuario; el pin queda en HIGH = apagado desde setup().)

@@ -40,9 +40,9 @@ Los dos tact switch que ya había alcanzan para jugar: la palanca es lo único q
       OLED SDA ─── ┤ D4 (GPIO5)  │
       OLED SCL ─── ┤ D5 (GPIO6)  │
                    │             │
-   Palanca SW ──── ┤ D8 (GPIO7)  │
+      Botón B ──── ┤ D8 (GPIO7)  │  ← ya cableado
    Palanca VRy ─── ┤ D9 (GPIO8)  │  (ADC1_CH7)
-      Botón B ──── ┤ D10 (GPIO9) │
+   Palanca SW ──── ┤ D10 (GPIO9) │
                    │             │
                    │    USB-C    │ ◄── alimentación / programación
                    └─────────────┘
@@ -65,7 +65,7 @@ Palanca KY-023 (5 pines):
   +5V ── 3V3 del XIAO   ← 3.3 V, NO 5 V (ver §4.3)
   VRx ── D1  (GPIO2)
   VRy ── D9  (GPIO8)
-  SW  ── D8  (GPIO7)
+  SW  ── D10 (GPIO9)
 ```
 
 ---
@@ -74,15 +74,17 @@ Palanca KY-023 (5 pines):
 
 | Componente | Pin XIAO | GPIO real | Nota |
 |---|---|---|---|
-| Botón A | D0 | GPIO1 | a GND, `INPUT_PULLUP` interno, sin resistencia externa. **Ya cableado** |
-| Palanca eje X | D1 | GPIO2 | analógico, **ADC1**_CH1 |
-| Botón C / activar | D2 | GPIO3 | a GND, `INPUT_PULLUP`. **Ya cableado.** Pin de strapping: ver nota abajo |
+| Botón A | D0 | GPIO1 | a GND, `INPUT_PULLUP` interno, sin resistencia externa. **Cableado y verificado** |
+| Palanca eje X | D1 | GPIO2 | analógico, **ADC1**_CH1. Junta verificada |
+| Botón C / activar | D2 | GPIO3 | a GND, `INPUT_PULLUP`. **Cableado y verificado.** Pin de strapping: ver nota abajo |
 | Buzzer pasivo | D3 | GPIO4 | PWM LEDC, resistencia ~100 Ω en serie recomendada |
 | OLED SDA | D4 | GPIO5 | I2C por defecto del XIAO |
 | OLED SCL | D5 | GPIO6 | I2C por defecto del XIAO |
-| Pulsador de la palanca | D8 | GPIO7 | a GND, `INPUT_PULLUP` |
+| Botón B / cursor | D8 | GPIO7 | a GND, `INPUT_PULLUP`. **Cableado y verificado** |
 | Palanca eje Y | D9 | GPIO8 | analógico, **ADC1**_CH7 |
-| Botón B | D10 | GPIO9 | a GND, `INPUT_PULLUP` |
+| Pulsador de la palanca | D10 | GPIO9 | a GND, `INPUT_PULLUP`. ⚠ **Soldadura abierta en la unidad de dev** |
+
+**Sobre D10 (GPIO9):** en la unidad de desarrollo este pin dejó de conducir. No responde ni con un puente directo contra GND, así que la falla está en la junta y no en el micro —el pin llegó a funcionar antes, con 14 pulsaciones limpias, y dejó de hacerlo tras un intento de resoldado—. Por eso se le asignó el pulsador de la palanca, que es la función más prescindible: duplica al botón C. Si el pin nunca revive, no se pierde nada. En una unidad sana, la asignación es válida igual.
 
 **Por qué los ejes van sí o sí a ADC1:** el ESP32-S3 le presta el ADC2 al driver de WiFi. Con el WiFi levantado —que acá es siempre, por OTA, panel LAN y Telegram— las lecturas de ADC2 fallan o devuelven basura. ADC1 son los GPIO1 a GPIO10, y ahí están GPIO2 y GPIO8.
 
@@ -141,9 +143,9 @@ Tres pulsadores momentáneos estándar (tipo tact switch). Los dos que ya había
 **Configuración en firmware:**
 ```cpp
 pinMode(PIN_BTN_A,  INPUT_PULLUP);  // GPIO1
-pinMode(PIN_BTN_B,  INPUT_PULLUP);  // GPIO9
+pinMode(PIN_BTN_B,  INPUT_PULLUP);  // GPIO7
 pinMode(PIN_BTN_C,  INPUT_PULLUP);  // GPIO3
-pinMode(PIN_JOY_SW, INPUT_PULLUP);  // GPIO7
+pinMode(PIN_JOY_SW, INPUT_PULLUP);  // GPIO9
 ```
 
 Con `INPUT_PULLUP`, el pin lee HIGH en reposo y LOW cuando el botón está presionado. Un pin sin nada conectado también lee HIGH, así que los botones se pueden ir montando de a uno.
