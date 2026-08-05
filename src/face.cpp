@@ -1661,10 +1661,12 @@ void Face::drawBoca(U8G2 &u8)
     // w girada 90°, y no sale de ninguna primitiva sola — hay que apilar dos
     // mitades y hacerlas coincidir en el punto del medio.
     case BocaStyle::BOCA_TRES: {
-        uint8_t arx = rx(5.0f), ary = ry(4.0f + resp * 0.5f);
-        arco(cx - 3, cy - ary + 1, arx, ary, FACE_BOCA_GROSOR,
+        // Panzas grandes y trazo grueso: al lado de los ojos de 30 px de
+        // ILUSIONADO, una "3" fina se perdía.
+        uint8_t arx = rx(7.0f), ary = ry(5.0f + resp * 0.6f);
+        arco(cx - 4, cy - ary + 1, arx, ary, 3,
              U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_LOWER_RIGHT);
-        arco(cx - 3, cy + ary - 1, arx, ary, FACE_BOCA_GROSOR,
+        arco(cx - 4, cy + ary - 1, arx, ary, 3,
              U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
