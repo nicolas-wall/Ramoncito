@@ -63,6 +63,83 @@ def icono_pong():
     return b
 
 
+def icono_snake():
+    """Una víbora en zigzag con la comida delante."""
+    b = lienzo()
+    marco(b, 0, 2, 32, 28)
+    # Cuerpo: segmentos de 3x3 con un hueco entre medio, en escalera
+    for (cx, cy) in [(4, 20), (8, 20), (12, 20), (12, 16), (12, 12),
+                     (16, 12), (20, 12), (20, 16)]:
+        rect(b, cx, cy, 3, 3)
+    rect(b, 20, 20, 4, 4)      # cabeza, un poco más grande
+    marco(b, 5, 7, 4, 4)       # comida, hueca
+    return b
+
+
+def icono_breakout():
+    """Filas de ladrillos, la paleta abajo y la pelota subiendo."""
+    b = lienzo()
+    for fila in range(3):
+        for col in range(5):
+            rect(b, 2 + col * 6, 4 + fila * 4, 5, 3)
+    rect(b, 15, 19, 2, 2)      # pelota
+    rect(b, 10, 26, 12, 2)     # paleta
+    return b
+
+
+def icono_invaders():
+    """El bicho clásico: cuerpo, ojos, antenas y patas."""
+    b = lienzo()
+    rect(b, 8, 10, 16, 8)      # cuerpo
+    rect(b, 6, 12, 2, 6)       # brazo izquierdo
+    rect(b, 24, 12, 2, 6)      # brazo derecho
+    rect(b, 10, 6, 2, 4)       # antena izquierda
+    rect(b, 20, 6, 2, 4)       # antena derecha
+    for x in (12, 18):         # ojos, en negativo
+        for y in range(12, 15):
+            for xx in range(x, x + 2):
+                b[y][xx] = 0
+    rect(b, 9, 18, 3, 4)       # patas
+    rect(b, 20, 18, 3, 4)
+    rect(b, 14, 24, 4, 2)      # base
+    return b
+
+
+def icono_tetris():
+    """Una pieza L grande y sola. Un icono de 32x32 no da para dos piezas:
+    a esta escala se leen como bloques sueltos y no como tetrominós."""
+    b = lienzo()
+    LADO = 9
+
+    def celda(cx, cy):
+        """Bloque con borde y hueco: así se ve dónde termina uno y empieza
+        el otro, que es lo que hace reconocible a la pieza."""
+        x, y = 6 + cx * LADO, 3 + cy * LADO
+        rect(b, x, y, LADO, LADO)
+        for j in range(y + 2, y + LADO - 2):
+            for i in range(x + 2, x + LADO - 2):
+                b[j][i] = 0
+
+    celda(0, 0)
+    celda(0, 1)
+    celda(0, 2)
+    celda(1, 2)
+    return b
+
+
+def icono_laberinto():
+    """Un laberinto chico con la bolita adentro."""
+    b = lienzo()
+    marco(b, 2, 3, 28, 26)
+    rect(b, 7, 3, 2, 12)
+    rect(b, 14, 8, 2, 14)
+    rect(b, 21, 3, 2, 12)
+    rect(b, 7, 20, 9, 2)
+    rect(b, 21, 20, 9, 2)
+    rect(b, 24, 25, 4, 4)      # bolita
+    return b
+
+
 def icono_salir():
     """Una puerta con una flecha saliendo hacia la derecha."""
     b = lienzo()
@@ -74,8 +151,13 @@ def icono_salir():
 
 
 ICONOS = [
-    ("ICONO_PONG",  icono_pong(),  "Pong"),
-    ("ICONO_SALIR", icono_salir(), "Salir"),
+    ("ICONO_PONG",      icono_pong(),      "Pong"),
+    ("ICONO_SNAKE",     icono_snake(),     "Snake"),
+    ("ICONO_BREAKOUT",  icono_breakout(),  "Breakout"),
+    ("ICONO_INVADERS",  icono_invaders(),  "Invaders"),
+    ("ICONO_TETRIS",    icono_tetris(),    "Tetris"),
+    ("ICONO_LABERINTO", icono_laberinto(), "Laberinto"),
+    ("ICONO_SALIR",     icono_salir(),     "Salir"),
 ]
 
 

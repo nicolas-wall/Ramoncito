@@ -7,13 +7,27 @@ sacudan.
 
 ## Estado actual — FW 0.11.0
 
-Andando: menú de juegos, **Pong** contra la CPU, menú de sistema (hora, red,
-firmware, ajustes), animación de encendido tipo CRT, y actualización OTA
-automática desde GitHub Releases.
+Menú de juegos en carrusel (una tarjeta por juego, con ícono y récord),
+**seis juegos**, menú de sistema, animación de encendido tipo CRT, y
+actualización OTA automática desde GitHub Releases.
+
+| Juego | Qué es | Controles |
+|---|---|---|
+| **Pong** | Contra la CPU, a 5 puntos | Eje Y, o B/C |
+| **Snake** | Grilla de 30×12, acelera al crecer | Palanca, o B/C giran en relativo |
+| **Breakout** | 32 ladrillos, 3 vidas | Eje X, o B/C |
+| **Invaders** | Formación 6×3 que acelera al quedar menos | Eje X, o B/C; dispara el pulsador |
+| **Tetris** | Pozo de 10×15, con nivel y pieza siguiente | **Requiere palanca** |
+| **Laberinto** | Se inclina el gabinete y rueda una bolita | **Acelerómetro** |
+
+Los récords se guardan en NVS y se muestran en la tarjeta de cada juego.
 
 Pendiente: la palanca física (KY-023, a comprar). Mientras tanto el firmware
-la emula por serial, así que todo es jugable y testeable sin ella — ver
-[Comandos seriales](#comandos-seriales).
+la emula por serial, así que todo es probable sin ella — ver
+[Comandos seriales](#comandos-seriales). Sin palanca, Tetris no se puede
+jugar de verdad (hacen falta izquierda, derecha, rotar y bajar, y solo hay
+tres botones) y en Invaders el cañón dispara solo en cadencia fija, porque
+B y C están ocupados moviendo la nave.
 
 ### De mascota a arcade
 
@@ -101,3 +115,12 @@ desde el navegador sin cable.
 | [`docs/01-HARDWARE.md`](docs/01-HARDWARE.md) | Pinout, BOM, cableado, diagnóstico |
 | [`docs/03-EXPRESIONES.md`](docs/03-EXPRESIONES.md) | Motor de caras y animaciones |
 | [`docs/04-PONG.md`](docs/04-PONG.md) | Diseño de Pong |
+
+## Agregar un juego
+
+1. Una clase que implemente `Juego` (ver [`src/juego.h`](src/juego.h))
+2. Un ícono en [`tools/gen-iconos.py`](tools/gen-iconos.py), y correrlo
+3. Una fila en la tabla `JUEGOS` de [`src/arcade.cpp`](src/arcade.cpp)
+
+El carrusel, el deslizamiento, los puntitos de posición, la pausa, la
+pantalla de fin y el récord salen solos del tamaño de esa tabla.

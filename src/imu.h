@@ -45,6 +45,20 @@ public:
     // Número de sacudidas detectadas en la ventana actual
     uint8_t sacudidasEnVentana() const { return _sacudidasEnVentana; }
 
+    // ── Vector de gravedad filtrado, en g ────────────────────────
+    // Es la orientación suavizada del gabinete, la misma que usa la
+    // detección de "levantado". La expone para el juego de laberinto, que
+    // inclina la bolita con esto.
+    //
+    // OJO: es la gravedad CRUDA filtrada, no la diferencia contra el
+    // baseline de reposo. El baseline se adapta solo (IMU_BASE_ALPHA), con
+    // una constante de tiempo de unos 17 s: si un juego lo usara como cero,
+    // sostener una inclinación la vería desvanecerse. Cada juego debe
+    // guardarse su propio cero al empezar la partida.
+    float gravX() const { return _gravX; }
+    float gravY() const { return _gravY; }
+    float gravZ() const { return _gravZ; }
+
 private:
     bool     _habilitado        = false;
 

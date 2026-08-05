@@ -118,6 +118,102 @@ static const float    PONG_BOLA_EFECTO   = 1.1f;
 static const uint8_t  PONG_PUNTOS_GANAR  = 5;
 static const uint32_t PONG_SAQUE_MS      = 900;  // pausa antes de cada saque
 
+// ----- Snake --------------------------------------------------
+// Grilla de 30x12 celdas de 4 px: 120x48 px, con la barra de puntaje
+// arriba y un marco alrededor de la cancha.
+static const uint8_t  SNAKE_CELDA      = 4;
+static const uint8_t  SNAKE_COLS       = 30;
+static const uint8_t  SNAKE_FILAS      = 12;
+static const uint8_t  SNAKE_X0         = 4;
+static const uint8_t  SNAKE_Y0         = 12;
+// Cadencia inicial y cuánto se acorta por cada comida. Toda la dificultad
+// del juego sale de acá: la víbora acelera a medida que crece.
+static const uint32_t SNAKE_PASO_MS    = 180;
+static const uint32_t SNAKE_ACEL_MS    = 4;
+static const uint32_t SNAKE_PASO_MIN_MS = 70;
+
+// ----- Breakout -----------------------------------------------
+static const uint8_t  BRK_COLS         = 8;
+static const uint8_t  BRK_FILAS        = 4;
+static const uint8_t  BRK_LAD_W        = 16;   // 8 x 16 = 128, ocupa el ancho justo
+static const uint8_t  BRK_LAD_H        = 5;
+static const uint8_t  BRK_X0           = 0;
+static const uint8_t  BRK_Y0           = 10;
+static const uint8_t  BRK_TECHO_Y      = 9;
+static const uint8_t  BRK_PALETA_W     = 20;
+static const uint8_t  BRK_PALETA_H     = 2;
+static const uint8_t  BRK_PALETA_Y     = 58;
+static const float    BRK_PALETA_VEL   = 2.6f;
+static const uint8_t  BRK_BOLA_LADO    = 3;
+static const float    BRK_BOLA_VEL     = 1.8f;
+static const float    BRK_BOLA_VEL_MAX = 3.0f;
+static const float    BRK_BOLA_EFECTO  = 1.2f;
+static const uint32_t BRK_SAQUE_MS     = 800;
+static const uint8_t  BRK_VIDAS        = 3;
+
+// ----- Invaders -----------------------------------------------
+static const uint8_t  INV_COLS         = 6;
+static const uint8_t  INV_FILAS        = 3;
+static const uint8_t  INV_BICHO_W      = 7;
+static const uint8_t  INV_BICHO_H      = 5;
+static const uint8_t  INV_SEP_X        = 13;
+static const uint8_t  INV_SEP_Y        = 9;
+static const uint8_t  INV_X0           = 8;
+static const uint8_t  INV_Y0           = 12;
+static const uint8_t  INV_TECHO_Y      = 10;
+static const float    INV_PASO_X       = 3.0f;
+static const float    INV_PASO_Y       = 4.0f;
+// La formación se mueve a saltos, no continuo: de ahí el andar
+// entrecortado. Acelerar es solo acortar este intervalo, y se acorta solo
+// a medida que quedan menos bichos.
+static const uint32_t INV_PASO_MS      = 650;
+static const uint32_t INV_PASO_MIN_MS  = 90;
+static const uint8_t  INV_NAVE_W       = 9;
+static const uint8_t  INV_NAVE_H       = 4;
+static const uint8_t  INV_NAVE_Y       = 57;
+static const float    INV_NAVE_VEL     = 2.2f;
+static const float    INV_TIRO_VEL     = 3.5f;
+static const float    INV_BOMBA_VEL    = 1.4f;
+static const uint32_t INV_BOMBA_MIN_MS = 900;
+static const uint32_t INV_BOMBA_MAX_MS = 2600;
+static const uint8_t  INV_VIDAS        = 3;
+// Cadencia del disparo automático, el modo sin palanca. Es el equivalente
+// a lo rápido que podría gatillar alguien: más corto y el juego se gana
+// solo, más largo y no alcanza a limpiar la formación antes de que baje.
+static const uint32_t INV_AUTO_TIRO_MS = 550;
+
+// ----- Tetris -------------------------------------------------
+// Pozo de 10x15 celdas de 4 px = 40x60 px, en vertical a la izquierda.
+// Los 84 px que sobran a la derecha son para puntaje, nivel y la pieza
+// siguiente. Es el único juego que necesita la palanca sí o sí: con tres
+// botones no entran izquierda, derecha, rotar y bajar.
+static const uint8_t  TET_COLS         = 10;
+static const uint8_t  TET_FILAS        = 15;
+static const uint8_t  TET_CELDA        = 4;
+static const uint8_t  TET_X0           = 4;
+static const uint8_t  TET_Y0           = 2;
+static const uint32_t TET_CAIDA_MS     = 600;
+static const uint32_t TET_CAIDA_MIN_MS = 120;
+static const uint8_t  TET_LINEAS_NIVEL = 5;    // líneas para subir de nivel
+
+// ----- Laberinto (por inclinación) ----------------------------
+// Grilla de 32x16 celdas de 4 px. La bolita se mueve inclinando el
+// gabinete: usa el vector de gravedad del IMU, con el cero tomado al
+// empezar la partida (ver imu.h sobre por qué no sirve el baseline).
+// Celda de 5 px: con la bolita de 3 px quedan 2 px de juego a cada lado.
+// Con celdas de 4 px el pasillo daba 1 px de margen y era exasperante.
+static const uint8_t  LAB_CELDA        = 5;
+static const uint8_t  LAB_COLS         = 25;
+static const uint8_t  LAB_FILAS        = 11;
+// Cuánta aceleración por unidad de inclinación, y cuánto se frena sola.
+// El roce es lo que hace que la bolita se pueda parar; sin él, patina.
+static const float    LAB_ACEL         = 0.30f;
+static const float    LAB_ROCE         = 0.90f;
+static const float    LAB_VEL_MAX      = 2.0f;
+// Sensibilidad de la inclinación: cuántos g de desvío son "a fondo".
+static const float    LAB_TILT_ESCALA  = 2.5f;
+static const uint16_t LAB_TIEMPO_S     = 60;
+
 // ----- Reacciones (duraciones en ms) --------------------------
 static const uint32_t REACCION_BTN_MS    = 1500;
 static const uint32_t REACCION_TOUCH_MS  = 2000;
