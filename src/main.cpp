@@ -24,6 +24,8 @@
 //    i         imprime estado
 //    u         fuerza chequeo de auto-OTA inmediatamente
 //    n         alterna el menú
+//    o         fuerza el standby (para probar cómo despierta)
+//    g         vigilancia del acelerómetro on/off
 //    k         escáner de pines (foto de todos los pines libres)
 //    v         vigilancia de pines on/off (imprime cada flanco)
 //    1 / 2 / 3 simulan los botones A / B / C
@@ -167,6 +169,9 @@ static void volverAlIdle(uint32_t ahora) {
 }
 
 // ------------------------------------------------------------
+// Corre al bootear y también al salir del standby: para el que mira, las dos
+// situaciones son la misma —la pantalla estaba negra y vuelve—, así que
+// merecen la misma entrada.
 static void dispararEncendido(uint32_t ahora) {
     // Animación de encendido tipo CRT, no bloqueante, ~2.1 s en 4 fases:
     //   0: una línea horizontal crece desde el centro
@@ -192,11 +197,15 @@ static void entrarStandby() {
 
 static void salirStandby(uint32_t ahora) {
     u8g2.setPowerSave(0);
+    marcarActividad(ahora);
     scheduleGuino(ahora);
     scheduleSospechoso(ahora);
     randExprActiva = false;
-    volverAlIdle(ahora);
-    Serial.println("[app] standby — pantalla encendida");
+    // Despertar corre la misma animación de encendido que el arranque: el
+    // panel estuvo apagado, así que desde afuera es indistinguible de
+    // prenderlo, y aparecer de golpe con la cara ya puesta se sentía abrupto.
+    dispararEncendido(ahora);
+    Serial.println("[app] standby — despertando");
 }
 
 // ------------------------------------------------------------
@@ -376,6 +385,10 @@ static void procesarComando(const char* cmd) {
         } else {
             Serial.println("[watch] OFF");
         }
+    } else if (cmd[0] == 'o') {
+        // Fuerza el standby. Sin esto habría que esperar los 10 minutos de
+        // inactividad para probar cómo despierta.
+        entrarStandby();
     } else if (cmd[0] == 'g') {
         imuWatch = !imuWatch;
         Serial.printf("[imu] vigilancia %s\n", imuWatch ? "ON - inclina el aparato" : "OFF");

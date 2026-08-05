@@ -74,6 +74,7 @@ pio run -t upload -t monitor     # todo junto
 h N       fuerza la hora; h -1 libera        u    fuerza chequeo de OTA
 s         alterna el sonido                  n    alterna el menú
 p         fuerza el portal WiFi              i    imprime estado
+o         fuerza el standby                  g    vigila el acelerómetro
 ```
 
 Sin la palanca conectada, estos emulan los controles:
