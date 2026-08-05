@@ -66,8 +66,7 @@ struct ExprDef {
 // ----------------------------------------------------------------
 enum class BocaStyle : uint8_t {
     NINGUNA,
-    LINEA,           // barra corta: neutro
-    LINEA_LADEADA,   // igual pero fuera de eje: escéptico
+    LINEA,           // curva muy abierta, casi recta: neutro
     SONRISA,         // semidisco relleno, lado plano arriba
     SONRISA_GRANDE,  // ídem, más abierta
     ARCO_TRISTE,     // arco ∩
@@ -81,13 +80,13 @@ enum class BocaStyle : uint8_t {
 // Mismo orden que EXPR_TABLE.
 static const BocaStyle BOCA_TABLE[13] = {
     BocaStyle::LINEA,           // NEUTRAL
-    BocaStyle::SONRISA,         // FELIZ
+    BocaStyle::ARCO_SUAVE,      // FELIZ — sonrisa de línea, no rellena
     BocaStyle::ARCO_TRISTE,     // TRISTE
     BocaStyle::ARCO_ENOJADO,    // ENOJADO
     BocaStyle::OVALO,           // SORPRENDIDO
-    BocaStyle::LINEA,           // ABURRIDO
+    BocaStyle::NINGUNA,         // ABURRIDO — sin boca
     BocaStyle::ONDA,            // DORMIDO
-    BocaStyle::LINEA_LADEADA,   // SOSPECHOSO
+    BocaStyle::NINGUNA,         // SOSPECHOSO — sin boca
     BocaStyle::SONRISA,         // AMOR
     BocaStyle::ARCO_SUAVE,      // GUINO
     BocaStyle::SONRISA_GRANDE,  // RISA
@@ -1540,12 +1539,9 @@ void Face::drawBoca(U8G2 &u8)
     // Neutro: una curva muy abierta, casi recta. No una barra: hasta el
     // reposo se lee mejor con algo de curvatura que con un palito.
     case BocaStyle::LINEA:
-    case BocaStyle::LINEA_LADEADA: {
-        int16_t dx = (st == BocaStyle::LINEA_LADEADA ? 4 : 0);
-        arco(cx + dx, cy - 1, rx(11.0f), ry(2.5f + resp * 0.6f), FACE_BOCA_GROSOR,
+        arco(cx, cy - 1, rx(11.0f), ry(2.5f + resp * 0.6f), FACE_BOCA_GROSOR,
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
-    }
 
     // Media elipse rellena con el lado plano arriba: la boca abierta
     // sonriente del estilo de referencia. Ancha y honda para que se lea.
@@ -1556,7 +1552,7 @@ void Face::drawBoca(U8G2 &u8)
 
     // La carcajada abre y cierra bastante más, y más rápido.
     case BocaStyle::SONRISA_GRANDE:
-        u8.drawFilledEllipse(cx, cy - 3, rx(15.0f), ry(11.0f + resp2 * 2.2f),
+        u8.drawFilledEllipse(cx, cy - 3, rx(11.0f), ry(11.0f + resp2 * 2.2f),
                              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
 
