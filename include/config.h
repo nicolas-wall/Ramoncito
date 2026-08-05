@@ -244,10 +244,17 @@ static const uint32_t INACTIVIDAD_STANDBY_MS  = 10UL * 60UL * 1000UL; // 10 min 
 // contra la versión sin boca sin tener que revertir nada.
 static const bool     FACE_BOCA_HABILITADA = true;
 // Centro vertical de la boca. Los ojos ocupan hasta y=46 (cy=35, alto 22),
-// así que 53 la deja despegada sin irse al borde inferior.
-static const float    FACE_BOCA_CY         = 53.0f;
-// Ancho de las bocas de barra (neutro y escéptico).
-static const float    FACE_BOCA_ANCHO      = 12.0f;
+// así que 54 la deja despegada sin que las formas grandes toquen el borde.
+static const float    FACE_BOCA_CY         = 54.0f;
+// Ancho y grosor de las bocas de barra (neutro y escéptico).
+static const float    FACE_BOCA_ANCHO      = 16.0f;
+static const uint8_t  FACE_BOCA_GROSOR     = 3;
+// Cuánto acompaña la boca al offset de mirada. En 1.0 se mueve igual que
+// los ojos y la cara entera parece girar; en 0 queda clavada al centro.
+static const float    FACE_BOCA_SIGUE_MIRADA = 1.0f;
+// Velocidad de la respiración propia de la boca (rad por frame). A 30 fps,
+// 0.055 da un ciclo de unos 4 s: se nota que está viva sin distraer.
+static const float    FACE_BOCA_VEL        = 0.055f;
 
 // ----- Animaciones idle (motor de ojos, doc 03) ---------------
 static const uint32_t PARPADEO_MIN_MS = 2000;

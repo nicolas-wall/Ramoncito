@@ -71,6 +71,7 @@ enum class BocaStyle : uint8_t {
     SONRISA,         // semidisco relleno, lado plano arriba
     SONRISA_GRANDE,  // ídem, más abierta
     ARCO_TRISTE,     // arco ∩
+    ARCO_ENOJADO,    // arco ∩ más ancho y abierto
     ARCO_SUAVE,      // arco ∪, sonrisa cerrada
     OVALO,           // óvalo relleno: sorpresa
     ONDA             // "ω": dormido, mareado
@@ -81,7 +82,7 @@ static const BocaStyle BOCA_TABLE[13] = {
     BocaStyle::LINEA,           // NEUTRAL
     BocaStyle::SONRISA,         // FELIZ
     BocaStyle::ARCO_TRISTE,     // TRISTE
-    BocaStyle::ARCO_TRISTE,     // ENOJADO
+    BocaStyle::ARCO_ENOJADO,    // ENOJADO
     BocaStyle::OVALO,           // SORPRENDIDO
     BocaStyle::LINEA,           // ABURRIDO
     BocaStyle::ONDA,            // DORMIDO
@@ -347,6 +348,7 @@ void Face::begin()
     _animEscalaY = 1.0f;
     _lidExtra    = 0.0f;
     _loopPhase   = 0.0f;
+    _bocaFase    = 0.0f;
     _sigTemblorMs = 0;
     _temblorX     = 0.0f;
     _sigSpawnMs   = 0;
@@ -728,6 +730,7 @@ void Face::updateGestos(uint32_t now)
 void Face::update(uint32_t now)
 {
     _lastNow = now;
+    _bocaFase += FACE_BOCA_VEL;
 
     // --- 0. Avance de fase INTRO/LOOP/OUTRO ----------------------
     if (_fase == AnimFase::OUTRO) {
@@ -1472,9 +1475,20 @@ void Face::drawBoca(U8G2 &u8)
 
     const float esc  = _animEscala;
     const float escY = _animEscala * _animEscalaY;
-    // _animOffX ya incluye el temblor del ENOJADO (ver updateLoop).
-    const int16_t cx = (int16_t)(64.0f + _animOffX);
-    const int16_t cy = (int16_t)(FACE_BOCA_CY + _animOffY);
+
+    // Respiración propia de la boca: un seno lento que abre y cierra un
+    // poco. Es lo que evita que quede como una calcomanía pegada mientras
+    // los ojos son lo único que se mueve.
+    const float resp = sinf(_bocaFase);
+    // Y un segundo seno más rápido y desfasado. Sumar dos ritmos que no son
+    // múltiplos entre sí hace que el ciclo no se note: con uno solo el ojo
+    // le encuentra el compás enseguida.
+    const float resp2 = sinf(_bocaFase * 1.7f + 1.1f);
+
+    // La boca acompaña la mirada. Los ojos se van a un costado y la boca va
+    // con ellos: leído junto, es la cara entera la que gira.
+    const int16_t cx = (int16_t)(64.0f + _animOffX + _gazeOffX * FACE_BOCA_SIGUE_MIRADA);
+    const int16_t cy = (int16_t)(FACE_BOCA_CY + _animOffY + _gazeOffY * FACE_BOCA_SIGUE_MIRADA);
 
     // Radios escalados con un piso: por debajo de 2 px las formas
     // redondeadas dejan de leerse y quedan como suciedad en pantalla.
@@ -1486,6 +1500,12 @@ void Face::drawBoca(U8G2 &u8)
         int r = (int)(v * escY + 0.5f);
         return (uint8_t)(r < 2 ? 2 : r);
     };
+    // Arco de grosor arbitrario: N circunferencias concéntricas. Con una
+    // sola el trazo se pierde al lado de los ojos, que son masas grandes.
+    auto arco = [&](int16_t ax, int16_t ay, uint8_t r, uint8_t grosor, uint8_t opt) {
+        for (uint8_t i = 0; i < grosor && r > i + 1; i++)
+            u8.drawCircle(ax, ay, (uint8_t)(r - i), opt);
+    };
 
     u8.setDrawColor(1);
 
@@ -1493,51 +1513,63 @@ void Face::drawBoca(U8G2 &u8)
 
     case BocaStyle::LINEA:
     case BocaStyle::LINEA_LADEADA: {
-        int16_t w = (int16_t)(FACE_BOCA_ANCHO * esc);
-        if (w < 4) w = 4;
+        // La barra se estira y se encoge un poco, y sube y baja un pelo.
+        int16_t w = (int16_t)((FACE_BOCA_ANCHO + resp * 2.0f) * esc);
+        if (w < 5) w = 5;
+        int16_t dy = (int16_t)(resp2 * 0.8f);
         // La versión ladeada se corre a un costado: una boca fuera de eje es
         // lo que hace que la cara se lea como escéptica y no como neutra.
-        int16_t x = cx - w / 2 + (st == BocaStyle::LINEA_LADEADA ? 4 : 0);
-        u8.drawBox(x, cy - 1, w, 2);
+        int16_t x = cx - w / 2 + (st == BocaStyle::LINEA_LADEADA ? 5 : 0);
+        u8.drawBox(x, cy - 1 + dy, w, FACE_BOCA_GROSOR);
         break;
     }
 
     // Semidisco relleno con el lado plano arriba: es la boca abierta
-    // sonriente del estilo de referencia.
-    case BocaStyle::SONRISA:
-        u8.drawDisc(cx, cy - 2, rx(6.0f), U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
-        break;
-
-    case BocaStyle::SONRISA_GRANDE:
-        u8.drawDisc(cx, cy - 3, rx(8.0f), U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
-        break;
-
-    // Arco hacia abajo (∩). Dos circunferencias concéntricas para darle
-    // 2 px de grosor: con una sola el trazo se pierde entre los ojos.
-    case BocaStyle::ARCO_TRISTE: {
-        uint8_t r = rx(6.0f);
-        u8.drawCircle(cx, cy + 3, r,     U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
-        u8.drawCircle(cx, cy + 3, r - 1, U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
+    // sonriente del estilo de referencia. El radio late con la respiración.
+    case BocaStyle::SONRISA: {
+        uint8_t r = rx(8.0f + resp * 1.2f);
+        u8.drawDisc(cx, cy - 3, r, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
+
+    // La carcajada abre y cierra bastante más, y más rápido.
+    case BocaStyle::SONRISA_GRANDE: {
+        uint8_t r = rx(10.0f + resp2 * 2.2f);
+        u8.drawDisc(cx, cy - 4, r, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        break;
+    }
+
+    // Arco hacia abajo (∩): boca triste.
+    case BocaStyle::ARCO_TRISTE:
+        arco(cx, cy + 4, rx(8.0f), FACE_BOCA_GROSOR,
+             U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
+        break;
+
+    // El enojo lleva su propio arco, más ancho y más abierto que el triste:
+    // con la misma boca, enojado y triste solo se distinguían por los ojos.
+    case BocaStyle::ARCO_ENOJADO:
+        arco(cx, cy + 5, rx(11.0f), FACE_BOCA_GROSOR,
+             U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
+        break;
 
     // Arco hacia arriba (∪): sonrisa cerrada, más discreta que el semidisco.
-    case BocaStyle::ARCO_SUAVE: {
-        uint8_t r = rx(6.0f);
-        u8.drawCircle(cx, cy - 3, r,     U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
-        u8.drawCircle(cx, cy - 3, r - 1, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+    case BocaStyle::ARCO_SUAVE:
+        arco(cx, cy - 4, rx(8.0f), FACE_BOCA_GROSOR,
+             U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
-    }
 
+    // Óvalo que se estira en vertical: el "oh" de la sorpresa.
     case BocaStyle::OVALO:
-        u8.drawFilledEllipse(cx, cy, rx(3.0f), ry(4.0f), U8G2_DRAW_ALL);
+        u8.drawFilledEllipse(cx, cy, rx(4.0f), ry(5.0f + resp * 1.2f), U8G2_DRAW_ALL);
         break;
 
-    // Dos arcos ∪ pegados = "ω". Es la boca de dormido/mareado del estilo.
+    // Dos arcos ∪ pegados = "ω". Se balancean en contrafase, uno sube
+    // mientras el otro baja, como una boca que masculla.
     case BocaStyle::ONDA: {
-        uint8_t r = rx(4.0f);
-        u8.drawCircle(cx - r, cy - 1, r, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
-        u8.drawCircle(cx + r, cy - 1, r, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        uint8_t r = rx(5.0f);
+        int16_t d = (int16_t)(resp * 1.2f);
+        arco(cx - r, cy - 1 - d, r, 2, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        arco(cx + r, cy - 1 + d, r, 2, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
 

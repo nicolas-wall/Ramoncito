@@ -93,6 +93,11 @@ private:
     // Micro-movimiento senoidal (respiración)
     float _breathPhase;   // ángulo en radianes, avanza cada frame
 
+    // Fase propia de la boca. No reusa _loopPhase porque ese avanza a una
+    // velocidad distinta según la expresión, y hasta se queda quieto en
+    // varias: la boca tiene que respirar en todas por igual.
+    float _bocaFase;
+
     // Estado de parpadeo
     enum class BlinkState : uint8_t { IDLE, CLOSING, CLOSED, OPENING };
     BlinkState _blinkState;
