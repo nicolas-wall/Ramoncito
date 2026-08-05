@@ -123,16 +123,22 @@ static const uint32_t REACCION_TOUCH_MS  = 2000;
 // ----- Expresiones aleatorias durante idle --------------------
 static const uint32_t GUINO_RAND_MIN_MS    = 15000;   //  15 s entre guiños
 static const uint32_t GUINO_RAND_MAX_MS    = 45000;   //  45 s
-static const uint32_t SOSP_RAND_MIN_MS     = 120000;  //   2 min entre sospechas
-static const uint32_t SOSP_RAND_MAX_MS     = 360000;  //   6 min
+static const uint32_t SOSP_RAND_MIN_MS     = 60000;   //   1 min entre sospechas
+static const uint32_t SOSP_RAND_MAX_MS     = 150000;  // 2.5 min
 static const uint32_t RAND_EXPR_DUR_MS     = 1500;    // duración normal
 static const uint32_t QUEHACER_EXPR_DUR_MS = 4000;    // duración en modo "qué hacemos"
 
 // ----- Inactividad y standby (pantalla apagada) ---------------
-// Cada 10 min sin interacción → cara SOSPECHOSO ("¿qué pasa?"). Con el
-// standby a los 30 min, aparece a los 10 y 20 min antes del apagado.
-static const uint32_t INACTIVIDAD_QUEHACER_MS = 10UL * 60UL * 1000UL;
-static const uint32_t INACTIVIDAD_STANDBY_MS  = 30UL * 60UL * 1000UL; // 30 min despierto → pantalla off
+// El OLED se apaga a los 10 min sin tocar nada. Es corto a propósito: son
+// píxeles orgánicos y la carita se mueve poco, así que cuanto menos tiempo
+// pase mostrando una imagen casi fija, mejor para el burn-in.
+//
+// El "¿qué pasa?" (cara SOSPECHOSO) se dispara cada 3 min de inactividad,
+// o sea a los 3, 6 y 9 min: tres avisos antes del apagado. Este intervalo
+// tiene que dividir a INACTIVIDAD_STANDBY_MS en varias partes; si fueran
+// iguales, el único aviso caería justo cuando la pantalla ya se apagó.
+static const uint32_t INACTIVIDAD_QUEHACER_MS = 3UL  * 60UL * 1000UL;
+static const uint32_t INACTIVIDAD_STANDBY_MS  = 10UL * 60UL * 1000UL; // 10 min despierto → pantalla off
 
 // ----- Animaciones idle (motor de ojos, doc 03) ---------------
 static const uint32_t PARPADEO_MIN_MS = 2000;
@@ -200,12 +206,16 @@ static const float    ANIM_MAREADO_VEL_ROT     = 0.08f;  // rad/frame de giro de
 
 // ----- Gestos idle (doc 03 §3.4) --------------------------------
 // Intervalos entre disparos (aleatorios dentro del rango)
-static const uint32_t GESTO_BOSTEZO_MIN_MS    = 5UL  * 60UL * 1000UL;   //  5 min
-static const uint32_t GESTO_BOSTEZO_MAX_MS    = 10UL * 60UL * 1000UL;   // 10 min
-static const uint32_t GESTO_SACUDIDA_MIN_MS   = 8UL  * 60UL * 1000UL;   //  8 min
-static const uint32_t GESTO_SACUDIDA_MAX_MS   = 15UL * 60UL * 1000UL;   // 15 min
-static const uint32_t GESTO_MIRADA_MIN_MS     = 3UL  * 60UL * 1000UL;   //  3 min
-static const uint32_t GESTO_MIRADA_MAX_MS     = 7UL  * 60UL * 1000UL;   //  7 min
+// Recalibrados para la ventana de 10 min: con los valores viejos (bostezo
+// 5-10 min, sacudida 8-15 min) la pantalla se apagaba antes de que muchos
+// llegaran a dispararse una sola vez. Ahora cada gesto entra al menos una
+// vez, y los tres juntos no se pisan.
+static const uint32_t GESTO_BOSTEZO_MIN_MS    = 120000;  // 2 min
+static const uint32_t GESTO_BOSTEZO_MAX_MS    = 240000;  // 4 min
+static const uint32_t GESTO_SACUDIDA_MIN_MS   = 150000;  // 2.5 min
+static const uint32_t GESTO_SACUDIDA_MAX_MS   = 330000;  // 5.5 min
+static const uint32_t GESTO_MIRADA_MIN_MS     = 90000;   // 1.5 min
+static const uint32_t GESTO_MIRADA_MAX_MS     = 210000;  // 3.5 min
 
 // Duraciones internas del bostezo (tramos acumulados)
 static const uint32_t BOSTEZO_T_AGRANDA_MS    = 400;   // 0–400  ms: ojos se agrandan
