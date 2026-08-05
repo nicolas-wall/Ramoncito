@@ -98,6 +98,11 @@ private:
     // varias: la boca tiene que respirar en todas por igual.
     float _bocaFase;
 
+    // Progreso del guiño: 0 = ojo abierto, 1 = del todo cerrado. Lo calcula
+    // updateLoop y lo consumen el ojo derecho y la boca, para que el párpado,
+    // la subida del ojo y la comisura se muevan como un solo gesto.
+    float _guinoW;
+
     // Estado de parpadeo
     enum class BlinkState : uint8_t { IDLE, CLOSING, CLOSED, OPENING };
     BlinkState _blinkState;

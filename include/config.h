@@ -256,6 +256,19 @@ static const uint32_t FACE_DORMIDO_ANTES_MS = 2200;
 // Duración de la cara contenta al volver de jugar.
 static const uint32_t FACE_POSTJUEGO_MS     = 2500;
 
+// ----- Guiño --------------------------------------------------
+// El guiño es un gesto con duración, no una pose: el ojo derecho baja el
+// párpado, lo sostiene un instante y vuelve a abrir. El ciclo se repite
+// mientras dure la expresión.
+static const uint32_t GUINO_CIERRA_MS   = 130;
+static const uint32_t GUINO_SOSTEN_MS   = 260;
+static const uint32_t GUINO_ABRE_MS     = 170;
+static const uint32_t GUINO_CICLO_MS    = 1400;  // incluye la pausa entre guiños
+// Cuánto baja el párpado del ojo que guiña, y cuánto sube el ojo con él.
+// La subida imita lo que hace la mejilla al cerrarse; de más queda torcido.
+static const float    GUINO_PARPADO_PX  = 18.0f;
+static const float    GUINO_SUBE_PX     = 4.0f;
+
 // ----- Boca ---------------------------------------------------
 // La cara arrancó siendo solo ojos. La boca se agregó después, en estilo
 // kawaii (pocas líneas, mucho contraste), y este flag permite compararla

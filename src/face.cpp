@@ -72,6 +72,8 @@ enum class BocaStyle : uint8_t {
     ARCO_TRISTE,     // arco ∩
     ARCO_ENOJADO,    // arco ∩ más ancho y abierto
     ARCO_SUAVE,      // arco ∪, sonrisa cerrada
+    SONRISA_TORCIDA, // ∪ con un lado más alto que el otro
+    BOCA_ABIERTA,    // óvalo grande relleno: el "aaah" de la emoción
     OVALO,           // óvalo relleno: sorpresa
     ONDA,            // "ω": dos arcos ∪ pegados
     SERPENTINA       // "~": línea ondulada horizontal
@@ -88,10 +90,10 @@ static const BocaStyle BOCA_TABLE[13] = {
     BocaStyle::ONDA,            // DORMIDO
     BocaStyle::NINGUNA,         // SOSPECHOSO — sin boca
     BocaStyle::SONRISA,         // AMOR
-    BocaStyle::ARCO_SUAVE,      // GUINO
+    BocaStyle::SONRISA_TORCIDA, // GUINO
     BocaStyle::SONRISA_GRANDE,  // RISA
     BocaStyle::SERPENTINA,      // MAREADO
-    BocaStyle::SONRISA          // ILUSIONADO
+    BocaStyle::BOCA_ABIERTA     // ILUSIONADO
 };
 
 // ----------------------------------------------------------------
@@ -169,9 +171,11 @@ static const ExprDef EXPR_TABLE[13] = {
       0, 0, 0, 0, EyeStyle::CIRCULO,
       26, 26, 13 },
 
-    // 9 — GUINO: ojo izq abierto normal (rect), ojo der cerrado (línea fina con rPTop=18)
+    // 9 — GUINO: los dos ojos abiertos. El derecho se cierra y se vuelve a
+    //   abrir por animación (_guinoW en updateLoop): un guiño es un gesto,
+    //   no un ojo que se queda apagado un segundo y medio.
     { 0, 0, 0, 0, EyeStyle::RECT,
-      18, 0, 0, 0, EyeStyle::RECT,
+      0, 0, 0, 0, EyeStyle::RECT,
       28, 22, 6 },
 
     // 10 — RISA (cosquillas): ojos apretados de carcajada "^  ^" (arco hacia arriba),
@@ -225,6 +229,32 @@ static inline float clampf(float v, float lo, float hi) {
 }
 
 // ----------------------------------------------------------------
+//  Desplazamiento vertical por ojo, en píxeles (negativo = más arriba).
+//  Mismo orden que EXPR_TABLE. Casi todas las expresiones tienen los dos
+//  ojos a la misma altura; esto existe para las que no.
+//
+//  El único caso hoy es el guiño: al cerrar un ojo, la mejilla de ese lado
+//  sube y se lleva el ojo con ella. Con los dos ojos a la misma altura, el
+//  guiño se leía como "un ojo se apagó" en vez de como un gesto.
+// ----------------------------------------------------------------
+struct OjoDY { float izq, der; };
+static const OjoDY EXPR_OJO_DY[13] = {
+    {0,0},  // NEUTRAL
+    {0,0},  // FELIZ
+    {0,0},  // TRISTE
+    {0,0},  // ENOJADO
+    {0,0},  // SORPRENDIDO
+    {0,0},  // ABURRIDO
+    {0,0},  // DORMIDO
+    {0,0},  // SOSPECHOSO
+    {0,0},  // AMOR
+    {0,0},  // GUINO — la subida del ojo la hace _guinoW, no una constante
+    {0,0},  // RISA
+    {0,0},  // MAREADO
+    {0,0}   // ILUSIONADO
+};
+
+// ----------------------------------------------------------------
 //  Carga los EyeParams destino para la expresión dada
 // ----------------------------------------------------------------
 static void exprToTargets(Expression e,
@@ -235,7 +265,7 @@ static void exprToTargets(Expression e,
     const ExprDef &d = EXPR_TABLE[idx];
 
     lt.cx       = EYE_LEFT_CX;
-    lt.cy       = EYE_CY;
+    lt.cy       = EYE_CY + EXPR_OJO_DY[idx].izq;
     lt.w        = d.w;
     lt.h        = d.h;
     lt.r        = d.r;
@@ -247,7 +277,7 @@ static void exprToTargets(Expression e,
     lt.offY     = 0.0f;
 
     rt.cx       = EYE_RIGHT_CX;
-    rt.cy       = EYE_CY;
+    rt.cy       = EYE_CY + EXPR_OJO_DY[idx].der;
     rt.w        = d.w;
     rt.h        = d.h;
     rt.r        = d.r;
@@ -483,9 +513,27 @@ void Face::updateLoop(uint32_t now)
     _animOffX = 0.0f;
     _animOffY = 0.0f;
     _lidExtra = 0.0f;
+    _guinoW   = 0.0f;
     float pulso = 1.0f;
 
     switch (_expr) {
+
+    case Expression::GUINO: {
+        // Ciclo de guiño: cierra, sostiene un instante y abre. Se repite
+        // mientras dure la expresión, así que si algún día se muestra más
+        // tiempo guiña de nuevo en vez de quedarse trabado.
+        uint32_t t = (now - _faseInicioMs) % GUINO_CICLO_MS;
+        if      (t < GUINO_CIERRA_MS)
+            _guinoW = (float)t / (float)GUINO_CIERRA_MS;
+        else if (t < GUINO_CIERRA_MS + GUINO_SOSTEN_MS)
+            _guinoW = 1.0f;
+        else if (t < GUINO_CIERRA_MS + GUINO_SOSTEN_MS + GUINO_ABRE_MS)
+            _guinoW = 1.0f - (float)(t - GUINO_CIERRA_MS - GUINO_SOSTEN_MS)
+                             / (float)GUINO_ABRE_MS;
+        else
+            _guinoW = 0.0f;
+        break;
+    }
 
     case Expression::FELIZ:
         // Rebote vertical alegre (solo hacia arriba, como saltitos)
@@ -1198,6 +1246,13 @@ void Face::drawEye(U8G2 &u8, const EyeParams &pIn)
     bool isLeft   = (p.cx < 64.0f);
     EyeStyle style = isLeft ? s_leftStyle : s_rightStyle;
 
+    // Guiño: solo el ojo derecho. El párpado baja y el ojo sube a la vez,
+    // que es lo que hace la mejilla al cerrarse.
+    if (!isLeft && _guinoW > 0.0f) {
+        p.pTop += GUINO_PARPADO_PX * _guinoW;
+        p.offY -= GUINO_SUBE_PX    * _guinoW;
+    }
+
     // Centro con offset de mirada/respiración
     int16_t cx = (int16_t)(p.cx + p.offX);
     int16_t cy = (int16_t)(p.cy + p.offY);
@@ -1516,6 +1571,24 @@ void Face::drawBoca(U8G2 &u8)
             u8.drawEllipse(ax, ay, (uint8_t)(arx - i), (uint8_t)(ary - i), opt);
     };
 
+    // Curva de boca punto por punto: una parábola suave más una inclinación
+    // lineal. La inclinación es lo único que no sale de una elipse — las
+    // primitivas de u8g2 no rotan, así que una sonrisa con un lado más alto
+    // que el otro hay que trazarla a mano.
+    auto curva = [&](int16_t ox, int16_t oy, int16_t semi, float prof,
+                     float inclina, uint8_t grosor) {
+        int16_t prevX = ox - semi;
+        int16_t prevY = oy + (int16_t)(-inclina);   // n = -1 en el extremo izq
+        for (int16_t i = -semi + 2; i <= semi; i += 2) {
+            float n = (float)i / (float)semi;
+            int16_t x = ox + i;
+            int16_t y = oy + (int16_t)(prof * (1.0f - n*n) + inclina * n);
+            for (uint8_t g = 0; g < grosor; g++)
+                u8.drawLine(prevX, prevY + g, x, y + g);
+            prevX = x; prevY = y;
+        }
+    };
+
     // Serpentina horizontal "~", dibujada como polilínea sobre un seno.
     // No sale de ninguna primitiva de u8g2: hay que ir punto por punto.
     auto onda = [&](int16_t ox, int16_t oy, int16_t semi, float amp,
@@ -1571,8 +1644,23 @@ void Face::drawBoca(U8G2 &u8)
 
     // Arco hacia arriba (∪): sonrisa cerrada, más discreta que la rellena.
     case BocaStyle::ARCO_SUAVE:
-        arco(cx, cy - 2, rx(13.0f), ry(5.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy, rx(15.0f), ry(7.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        break;
+
+    // Sonrisa con el lado derecho levantado, que es el del ojo que guiña.
+    // Es el gesto humano: se guiña y se tira de la comisura de ESE lado.
+    // Poco, apenas 3 px: de más se vuelve mueca.
+    case BocaStyle::SONRISA_TORCIDA:
+        curva(cx, cy - 1, (int16_t)(12.0f * esc), 4.5f + resp * 0.6f,
+              -3.0f, FACE_BOCA_GROSOR);
+        break;
+
+    // El "aaah": óvalo grande y relleno, no una sonrisa. Late más fuerte
+    // que el resto porque es la cara de entusiasmo.
+    case BocaStyle::BOCA_ABIERTA:
+        u8.drawFilledEllipse(cx, cy + 1, rx(7.0f), ry(9.0f + resp * 1.8f),
+                             U8G2_DRAW_ALL);
         break;
 
     // Óvalo que se estira en vertical: el "oh" de la sorpresa.
