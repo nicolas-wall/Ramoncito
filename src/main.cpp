@@ -1,30 +1,35 @@
 // =============================================================
 //  Ramoncito — main.cpp
-//  Orquestador: máquina de estados, eventos, mood/sound/net.
+//  Orquestador del mini arcade: máquina de estados, eventos, render.
 //
-//  Controles (pinout arcade — ver config.h):
-//    Botón A (D0)  → abre el menú / avanza de página.
-//    Botón B (D10) → mueve el cursor dentro de una página.
-//    Botón C (D2)  → activa la opción resaltada (equivale al botón
-//                    de la palanca).
-//    Palanca        → arriba/abajo mueven el cursor; su pulsador activa.
-//    Sacudir/alzar (IMU) → siguen dando reacciones faciales.
-//    Inactividad: cada 10 min → cara SOSPECHOSO (§1.4).
+//  Qué es este aparato: un arcade de escritorio. Se juega con la palanca
+//  y tres botones; cuando nadie juega, muestra una carita que reacciona
+//  cada tanto y responde a que lo alcen o lo sacudan. Nada más.
+//
+//  Lo que fue y ya no es: arrancó como mascota tipo Tamagotchi, con
+//  humor, personalidad que evolucionaba, mensajería por Telegram y un
+//  dashboard web. Todo eso se retiró en la 0.11.0 — ver el README.
+//
+//  Controles:
+//    Botón A (D0)  → abre el menú de sistema / avanza de página.
+//    Botón B (D8)  → mueve el cursor.
+//    Botón C (D2)  → activa; desde la cara, ENTRA AL ARCADE.
+//    Palanca       → arriba/abajo mueven el cursor; su pulsador activa.
+//    IMU           → alzarlo y sacudirlo dan reacciones faciales.
 //
 //  Comandos seriales:
 //    h N       fuerza la hora; h -1 libera
-//    m F E A   fija humor (0-100)
 //    s         alterna sonido on/off
 //    p         fuerza el portal WiFi
-//    i         imprime estado (incluye rasgos de personalidad)
-//    q         imprime rasgos + edad + factor de plasticidad
-//    q A E     fija los dos ejes de personalidad (para pruebas)
+//    i         imprime estado
 //    u         fuerza chequeo de auto-OTA inmediatamente
 //    n         alterna el menú
+//    k         escáner de pines (foto de todos los pines libres)
+//    v         vigilancia de pines on/off (imprime cada flanco)
 //    1 / 2 / 3 simulan los botones A / B / C
+//    z         pulsador de la palanca
 //    w x a d   palanca arriba/abajo/izquierda/derecha (stub sin hardware).
 //              Es w-x-a-d y no WASD porque 's' ya es el toggle de sonido.
-//    z         pulsador de la palanca
 // =============================================================
 
 #include <Arduino.h>
@@ -35,87 +40,66 @@
 #include "face.h"
 #include "input.h"
 #include "sound.h"
-#include "mood.h"
-#include "personality.h"
 #include "net.h"
 #include "menu.h"
 #include "ota.h"
 #include "imu.h"
-#include "notify.h"
-#include "telegram.h"
 #include "arcade.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE);  // R2 = 180° (montaje invertido)
 
 // ----- Máquina de estados global ------------------------------
-// ARCADE va al final para no correr los índices que ya aparecen en los logs
-// como "est:N" y en las capturas seriales viejas.
-enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO, NOTIF, ARCADE };
+enum class AppState : uint8_t { IDLE, REACTING, MENU, STANDBY, ENCENDIENDO, ARCADE };
 static AppState appState = AppState::IDLE;
 
-// ----- Notificaciones en pantalla -----------------------------
-static Notif    notifActual;              // aviso que se está mostrando
-static uint32_t notifDesde   = 0;         // millis() cuando empezó a mostrarse
-static AppState notifVolverA = AppState::IDLE;  // estado al que volver al cerrar
-
-// ----- Disparadores de mensajes proactivos de Telegram --------
-static bool     tgEnergiaBajaAvisada = false;  // ya avisé "poca energia"
-static bool     tgUpdateAvisado      = false;  // ya avisé "hay update"
-
+// ----- Menú de sistema ----------------------------------------
 static uint32_t menuHasta = 0;
 static const uint32_t MENU_TIMEOUT_MS = 10000;
-static uint8_t  menuPagina = 1;  // paginación del menú: 1..4
-static uint8_t  ajustesSel = 0;  // opción resaltada en página 4 (0=Sonido,1=Renacer,2=WiFi)
+static uint8_t  menuPagina = 1;  // 1 = info, 2 = ajustes
+static uint8_t  ajustesSel = 0;  // 0 = Sonido, 1 = Cambiar WiFi
 
-static uint32_t    reaccionHasta   = 0;
-static const char* reaccionLabel   = "";
+// ----- Reacción facial pasajera -------------------------------
+static uint32_t    reaccionHasta = 0;
+static const char* reaccionLabel = "";
 
-static Expression  idleExprActual  = Expression::NEUTRAL;
-static uint32_t    proximoRonquido = 0;
+// Cara de reposo del gabinete.
+//
+// Antes la elegía el humor: felicidad/energía/aburrimiento decidían entre
+// FELIZ, TRISTE, ENOJADO o ABURRIDO. Al pasar a arcade se fueron los
+// sensores táctiles que alimentaban esas variables, y quedaron las salidas
+// sin entradas: el único resultado posible era una deriva lenta hacia la
+// cara triste, sin manera de revertirla.
+//
+// Ahora el reposo es NEUTRAL y la vida de la carita sale de los gestos
+// ocasionales del idle y de las reacciones del IMU. Este es el único lugar
+// que hay que tocar si alguna vez se quiere otra cosa.
+static inline Expression caraDeReposo() { return Expression::NEUTRAL; }
 
-// ----- Malhumor (§1.2) ----------------------------------------
-// Ya no lo disparan las cosquillas (el sensor de pie se retiró); ahora la
-// única fuente es sacudir el aparato de más (IMU).
-// Ya no cambia la cara: desde que el reposo es NEUTRAL, lo único que queda
-// mirando esta variable es la respuesta de Telegram a "estás enojado?", que
-// contesta que sí si lo sacudiste hace poco. La reacción visible a la
-// sacudida es la expresión momentánea (MAREADO/SORPRENDIDO), no este estado.
-static uint32_t malhumorHasta   = 0;  // 0 = sin malhumor; > 0 = timestamp de expiración
+static Expression idleExprActual = Expression::NEUTRAL;
 
-// ----- Renacer: confirmación en página 4 ----------------------
-static bool     renacerConfirmando  = false; // esperando el botón C para confirmar
-static uint32_t renacerTimeoutHasta = 0;     // millis límite para confirmar
+// ----- Animación de encendido CRT -----------------------------
+// Era la animación de "nacimiento" de la mascota, disparada al renacer o
+// al conocer la hora por primera vez. Sin mascota que nazca, quedó como lo
+// que siempre pareció: el encendido de un televisor viejo, al bootear.
+static uint32_t encendidoInicioMs = 0;
+static uint8_t  encendidoFase     = 0;
 
-// ----- Animación de nacimiento --------------------------------
-static uint32_t nacimientoInicioMs = 0;  // millis() cuando empezó la anim
-static uint8_t  nacimientoFase     = 0;  // fase actual (0, 1, 2)
-
-// ----- Expresiones aleatorias idle ----------------------------
+// ----- Expresiones aleatorias durante el idle -----------------
 static uint32_t sigGuino       = 0;
 static uint32_t sigSospechoso  = 0;
 static uint32_t randExprHasta  = 0;
 static bool     randExprActiva = false;
 
-// ----- Interacciones nocturnas (§1.3) --------------------------
-static uint32_t caraNocheHasta     = 0;  // 0 = inactiva; > 0 = volver a DORMIDO cuando venza
-
 // ----- Inactividad y standby ----------------------------------
-static uint32_t ultimaActividad    = 0;  // millis del último evento de interacción
-static uint32_t sigQuePasa         = 0;  // próximo disparo de cara SOSPECHOSO por inactividad (§1.4)
-static uint32_t entroADormirMs     = 0;  // millis cuando empezó a dormir
-static uint32_t standbyGraciaHasta = 0;  // bloquea la transición a dormir tras salir del standby
-
-// ----- Muestreo pasivo de personalidad (§3.2) -----------------
-// Se dispara cada MOOD_TICK_MS/TIME_SCALE, igual que el tick de humor,
-// pero solo durante IDLE (despierto o siesta). El sueño nocturno no cuenta.
-static uint32_t sigMuestraPers = 0;
+static uint32_t ultimaActividad = 0;  // millis del último evento de interacción
+static uint32_t sigQuePasa      = 0;  // próximo disparo de cara SOSPECHOSO por inactividad
 
 // ----- Diagnóstico de pines (comandos 'k' y 'v') ---------------
 // Todos los pines del XIAO que no usan el OLED, el buzzer ni el LED.
-static const uint8_t PIN_DIAG[]        = {  1,    2,    3,    7,    8,    9,   43,   44 };
-static const char*   PIN_DIAG_ETIQ[]   = {"D0", "D1", "D2", "D8", "D9","D10", "D6", "D7"};
-static const uint8_t PIN_DIAG_N        = sizeof(PIN_DIAG);
+static const uint8_t PIN_DIAG[]      = {  1,    2,    3,    7,    8,    9,   43,   44 };
+static const char*   PIN_DIAG_ETIQ[] = {"D0", "D1", "D2", "D8", "D9","D10", "D6", "D7"};
+static const uint8_t PIN_DIAG_N      = sizeof(PIN_DIAG);
 // Modo vigilancia: muestrea en CADA vuelta del loop (no una vez por frame)
 // e imprime solo cuando un pin cambia de nivel. A diferencia de 'k', que se
 // consulta desde afuera, esto no se puede perder una pulsación corta.
@@ -138,27 +122,8 @@ static void scheduleSospechoso(uint32_t ahora) {
                     (uint32_t)(random((long)(SOSP_RAND_MAX_MS - SOSP_RAND_MIN_MS)));
 }
 
-// ------------------------------------------------------------
-// Cara de reposo del gabinete.
-//
-// Antes la elegía el humor: felicidad/energía/aburrimiento decidían entre
-// FELIZ, TRISTE, ENOJADO, ABURRIDO o DORMIDO. Eso funcionaba cuando había
-// caricias y cosquillas para alimentar esas variables; al pasar a arcade,
-// esos sensores se fueron y quedaron las salidas sin entradas. El único
-// resultado posible era una deriva lenta hacia la cara triste, sin manera
-// de revertirla — un tobogán de un solo sentido.
-//
-// Ahora el reposo es NEUTRAL y la vida de la carita sale de otro lado: los
-// gestos ocasionales durante el idle (guiño, mirada perdida, bostezo,
-// sacudida de cabeza) y las reacciones al movimiento del IMU. Reacciona,
-// pero no acumula un estado de ánimo que nadie puede cambiar.
-//
-// Si algún día se quiere volver a un reposo con humor, este es el único
-// lugar que hay que tocar.
-static inline Expression caraDeReposo() { return Expression::NEUTRAL; }
-
-// Registra cualquier interacción: actualiza ultimaActividad y
-// reinicia el contador del "qué pasa" (§1.4).
+// Registra cualquier interacción: actualiza ultimaActividad y reinicia el
+// contador del "¿qué pasa?" por inactividad.
 static void marcarActividad(uint32_t ahora) {
     ultimaActividad = ahora;
     sigQuePasa      = ahora + INACTIVIDAD_QUEHACER_MS;
@@ -167,8 +132,8 @@ static void marcarActividad(uint32_t ahora) {
 // ------------------------------------------------------------
 static void scanI2C() {
     Serial.println("[i2c] escaneando bus...");
-    // Solo rango válido 0x08..0x77; las direcciones <0x08 y >0x77 son
-    // reservadas y generan falsos positivos (ej. el "fantasma" en 0x01).
+    // Solo rango válido 0x08..0x77; las direcciones fuera de ahí son
+    // reservadas y generan falsos positivos.
     for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
         Wire.beginTransmission(addr);
         if (Wire.endTransmission() == 0)
@@ -179,182 +144,41 @@ static void scanI2C() {
 // ------------------------------------------------------------
 static void reaccionar(Expression e, uint32_t duracionMs,
                        const char* label, uint32_t ahora) {
-    randExprActiva  = false;
+    randExprActiva = false;
     marcarActividad(ahora);
     face.setExpression(e);
-    reaccionHasta   = ahora + duracionMs;
-    reaccionLabel   = label;
-    appState        = AppState::REACTING;
+    reaccionHasta = ahora + duracionMs;
+    reaccionLabel = label;
+    appState      = AppState::REACTING;
 }
 
 // ------------------------------------------------------------
-static void entrarADormir(uint32_t ahora) {
-    randExprActiva = false;
-    appState = AppState::SLEEPING;
-    face.setExpression(Expression::DORMIDO);
-    sound.play(Melody::DORMIR);
-    proximoRonquido = ahora + 3000;
-    entroADormirMs  = ahora;
-    Serial.println("[app] a dormir...");
-}
-
-static void despertar(uint32_t ahora) {
-    appState = AppState::IDLE;
+static void volverAlIdle(uint32_t ahora) {
+    appState       = AppState::IDLE;
     idleExprActual = caraDeReposo();
     face.setExpression(idleExprActual);
-    sound.play(Melody::DESPERTAR);
     marcarActividad(ahora);
-    scheduleGuino(ahora);
-    scheduleSospechoso(ahora);
-    randExprActiva = false;
-    caraNocheHasta = 0;  // limpiar estado nocturno al despertar
-    Serial.println("[app] buen dia!");
 }
 
 // ------------------------------------------------------------
-static void dispararNacimiento(uint32_t ahora) {
-    // Arranca la animación de encendido CRT (no bloqueante).
-    // Fase 0 (~260 ms): línea horizontal crece desde el centro.
-    // Fase 1 (~560 ms): apertura vertical hacia pantalla llena (flash).
-    // Fase 2 (~480 ms): ruido de estática/sintonía.
-    // Fase 3 (~820 ms): revelado de cara con barrido de scanline.
-    // Al terminar: IDLE con expresión FELIZ. Total ~2.1 s.
-    appState           = AppState::NACIENDO;
-    nacimientoInicioMs = ahora;
-    nacimientoFase     = 0;
-    // No mostramos DORMIDO; la pantalla arranca en negro (fase 0 lo dibuja).
-    // Preparamos la expresión FELIZ para la fase 3, pero no la enviamos aún.
-    face.setExpression(Expression::FELIZ);
-    // TV_ON cubre toda la animación: pop → calentamiento → estática → chillido CRT → chirp final.
+static void dispararEncendido(uint32_t ahora) {
+    // Animación de encendido tipo CRT, no bloqueante, ~2.1 s en 4 fases:
+    //   0: una línea horizontal crece desde el centro
+    //   1: la línea se abre en vertical hasta llenar la pantalla (flash)
+    //   2: estática de sintonía
+    //   3: la cara se revela con un barrido descendente
+    appState          = AppState::ENCENDIENDO;
+    encendidoInicioMs = ahora;
+    encendidoFase     = 0;
+    face.setExpression(caraDeReposo());
     sound.play(Melody::TV_ON);
-    randExprActiva     = false;
-    Serial.println("[app] animacion nacimiento CRT iniciada");
-}
-
-// Nombre corto de la expresión para el panel web (WebData.expresion).
-static const char* nombreExpresion(Expression e) {
-    switch (e) {
-        case Expression::FELIZ:      return "feliz";
-        case Expression::TRISTE:     return "triste";
-        case Expression::ENOJADO:    return "enojado";
-        case Expression::SORPRENDIDO:return "sorprendido";
-        case Expression::ABURRIDO:   return "aburrido";
-        case Expression::DORMIDO:    return "dormido";
-        case Expression::SOSPECHOSO: return "sospechoso";
-        case Expression::AMOR:       return "enamorado";
-        case Expression::RISA:       return "riendo";
-        case Expression::MAREADO:    return "mareado";
-        case Expression::ILUSIONADO: return "ilusionado";
-        default:                     return "tranquilo";
-    }
-}
-
-// ── Respuestas a preguntas por Telegram (local, sin API) ──────
-// Normaliza a minúsculas ASCII sin acentos para poder matchear palabras
-// aunque el usuario escriba con tildes, ñ, ¿, mayúsculas, etc.
-static String normalizar(const char* s) {
-    String o;
-    for (const uint8_t* p = (const uint8_t*)s; *p; ) {
-        uint8_t c = *p;
-        if (c == 0xC3 && p[1]) {          // vocales acentuadas y ñ (UTF-8)
-            uint8_t d = p[1]; p += 2; char m = 0;
-            switch (d) {
-                case 0xA1: case 0x81: m='a'; break;  case 0xA9: case 0x89: m='e'; break;
-                case 0xAD: case 0x8D: m='i'; break;  case 0xB3: case 0x93: m='o'; break;
-                case 0xBA: case 0x9A: m='u'; break;  case 0xB1: case 0x91: m='n'; break;
-            }
-            if (m) o += m; continue;
-        }
-        if (c == 0xC2 && p[1] == 0xBF) { p += 2; continue; }  // ¿
-        if (c >= 0x80) { p++; continue; }                     // otros no-ASCII: descartar
-        if (c >= 'A' && c <= 'Z') c += 32;
-        o += (char)c; p++;
-    }
-    return o;
-}
-static inline bool tiene(const String& n, const char* kw) { return n.indexOf(kw) >= 0; }
-
-// Responde una pregunta en personaje según el estado real. Fija la cara a usar.
-static String responder(const char* q, Expression& rx) {
-    String n = normalizar(q);
-    uint8_t f = mood.happiness(), e = mood.energy(), a = mood.boredom();
-
-    if (tiene(n,"hola")||tiene(n,"buenas")||tiene(n,"buen dia")||tiene(n,"holis")||tiene(n,"ola")) {
-        rx = Expression::FELIZ; return "hola! \xF0\x9F\x90\xB9 que bueno verte";
-    }
-    if (tiene(n,"como estas")||tiene(n,"como andas")||tiene(n,"que tal")||tiene(n,"como te sentis")||tiene(n,"como va")) {
-        if (e < 20) { rx = Expression::DORMIDO;  return "un poco cansado \xF0\x9F\xA5\xB1 (energia "+String(e)+")"; }
-        if (a > 70) { rx = Expression::ABURRIDO; return "medio aburrido... juga conmigo! \xF0\x9F\xA5\xBA"; }
-        if (f > 70) { rx = Expression::FELIZ;    return "de diez! \xF0\x9F\x98\x84 (felicidad "+String(f)+")"; }
-        rx = caraDeReposo();          return "ahi ando \xF0\x9F\x90\xB9 feliz "+String(f)+", energia "+String(e);
-    }
-    if (tiene(n,"hambre")||tiene(n,"comer")||tiene(n,"comida")) {
-        if (e < 40) { rx = Expression::ABURRIDO; return "si! me vendria bien recargar energia \xF0\x9F\x8D\xBD"; }
-        rx = Expression::FELIZ; return "estoy bien, gracias \xF0\x9F\x98\x8B";
-    }
-    if (tiene(n,"cansado")||tiene(n,"sueno")||tiene(n,"dormir")||tiene(n,"dormido")) {
-        if (e < 30) { rx = Expression::DORMIDO; return "si, tengo suenito \xF0\x9F\x98\xB4"; }
-        rx = Expression::FELIZ; return "no, estoy piola \xF0\x9F\x98\x8A";
-    }
-    if (tiene(n,"me queres")||tiene(n,"me amas")||tiene(n,"me quieres")||tiene(n,"te caigo")||tiene(n,"me odias")) {
-        rx = Expression::AMOR; return "te re quiero! \xF0\x9F\xA5\xB0";
-    }
-    if (tiene(n,"quien sos")||tiene(n,"que sos")||tiene(n,"como te llamas")||tiene(n,"tu nombre")) {
-        rx = Expression::ILUSIONADO; return "soy Ramoncito, tu mascota \xF0\x9F\x90\xB9";
-    }
-    if (tiene(n,"edad")||tiene(n,"cuantos anos")||tiene(n,"cuanto tenes")||tiene(n,"cumple")) {
-        int d = personality.edadDias(); rx = Expression::FELIZ;
-        if (d < 0) return "recien naci! \xF0\x9F\x90\xA3";
-        return "tengo "+String(d)+" dias \xF0\x9F\x8E\x82";
-    }
-    if (tiene(n,"aburr")) {
-        if (a > 60) { rx = Expression::ABURRIDO; return "si, un poco... haga algo conmigo \xF0\x9F\xA5\xBA"; }
-        rx = Expression::FELIZ; return "para nada, estoy entretenido \xF0\x9F\x98\x84";
-    }
-    if (tiene(n,"enojado")||tiene(n,"enojada")||tiene(n,"bravo")||tiene(n,"enojas")) {
-        bool mh = (malhumorHasta != 0) && ((int32_t)(millis() - malhumorHasta) < 0);
-        if (mh) { rx = Expression::ENOJADO; return "un poco! no me sacudas tanto \xF0\x9F\x98\xA4"; }
-        rx = Expression::FELIZ; return "nono, todo bien \xF0\x9F\x98\x8A";
-    }
-    if (tiene(n,"hora")) {
-        if (net.timeValid()) {
-            struct tm ti;
-            if (getLocalTime(&ti, 10)) {
-                char b[8]; snprintf(b, sizeof(b), "%02d:%02d", ti.tm_hour, ti.tm_min);
-                rx = Expression::FELIZ; return String("son las ")+b+" \xF0\x9F\x95\x90";
-            }
-        }
-        rx = Expression::SOSPECHOSO; return "no se la hora todavia \xF0\x9F\xA4\x94";
-    }
-    if (tiene(n,"chiste")||tiene(n,"reir")||tiene(n,"gracioso")||tiene(n,"contame algo")) {
-        static const char* j[] = {
-            "por que el hamster no usa la compu? le tiene miedo al raton! \xF0\x9F\x90\xADi\xF0\x9F\x98\x86",
-            "que hace un pez? nada! \xF0\x9F\x98\x82",
-            "soy chiquito pero tengo un monton de... RAM \xF0\x9F\x90\xB9" };
-        rx = Expression::RISA; return j[esp_random() % 3];
-    }
-    if (tiene(n,"te gusta")||tiene(n,"que te gusta")||tiene(n,"hobby")) {
-        rx = Expression::AMOR; return "me encanta que juegues conmigo \xF0\x9F\x95\xB9\xEF\xB8\x8F";
-    }
-    if (tiene(n,"sonido")||tiene(n,"escuchas")||tiene(n,"mudo")||tiene(n,"volumen")) {
-        rx = Expression::FELIZ; return sound.enabled() ? "el sonido esta prendido \xF0\x9F\x94\x8A"
-                                                       : "estoy en mudo \xF0\x9F\x94\x87";
-    }
-    if (tiene(n,"gracias")) { rx = Expression::AMOR; return "de nada! \xF0\x9F\xA5\xB0"; }
-
-    // Sin match: respuesta variada en personaje
-    static const char* fb[] = {
-        "mmm eso no lo se, pero me caes bien \xF0\x9F\x98\x84",
-        "preguntame otra cosa \xF0\x9F\x90\xB9",
-        "soy un hamster, no se todo eh \xF0\x9F\x98\x85",
-        "\xF0\x9F\xA4\x94 ni idea, pero gracias por hablarme" };
-    rx = Expression::SOSPECHOSO; return fb[esp_random() % 4];
+    randExprActiva = false;
+    Serial.println("[app] encendido CRT");
 }
 
 // ------------------------------------------------------------
 static void entrarStandby() {
-    randExprActiva     = false;
-    renacerConfirmando = false;   // cancelar confirmación de renacer si estaba activa
+    randExprActiva = false;
     appState = AppState::STANDBY;
     u8g2.setPowerSave(1);
     Serial.println("[app] standby — pantalla apagada");
@@ -362,24 +186,17 @@ static void entrarStandby() {
 
 static void salirStandby(uint32_t ahora) {
     u8g2.setPowerSave(0);
-    marcarActividad(ahora);
-    entroADormirMs     = ahora;          // resetea el timer de sueño
-    standbyGraciaHasta = ahora + 30000;  // 30 s sin poder volver a dormir
     scheduleGuino(ahora);
     scheduleSospechoso(ahora);
     randExprActiva = false;
-    // Siempre vuelve a IDLE para que el usuario pueda interactuar
-    appState = AppState::IDLE;
-    idleExprActual = caraDeReposo();
-    face.setExpression(idleExprActual);
-    Serial.println("[app] standby — pantalla encendida (gracia 30 s)");
+    volverAlIdle(ahora);
+    Serial.println("[app] standby — pantalla encendida");
 }
 
 // ------------------------------------------------------------
-// Clasificación de eventos usada por el menú: un pulso de "mover cursor"
-// puede venir del botón B o de la palanca; uno de "activar", del botón C
-// o del pulsador de la palanca. Así los dos caminos de control conviven
-// sin duplicar la lógica de cada página.
+// Clasificación de eventos del menú: un pulso de "mover cursor" puede venir
+// del botón B o de la palanca; uno de "activar", del botón C o del pulsador
+// de la palanca. Así los dos caminos de control conviven sin duplicar nada.
 static inline bool evMueveCursor(InputEvent ev) {
     return ev == InputEvent::BTN_B_PRESS ||
            ev == InputEvent::JOY_DOWN    || ev == InputEvent::JOY_UP;
@@ -388,191 +205,96 @@ static inline bool evActiva(InputEvent ev) {
     return ev == InputEvent::BTN_C_PRESS || ev == InputEvent::JOY_SW_PRESS;
 }
 
+// ------------------------------------------------------------
 static void despacharEventos(uint32_t ahora) {
     InputEvent ev;
     while ((ev = input.nextEvent()) != InputEvent::NONE) {
 
-        // Standby: cualquier botón o golpe de palanca despierta la pantalla
+        // Standby: cualquier control despierta la pantalla
         if (appState == AppState::STANDBY) {
             salirStandby(ahora);
             continue;
         }
 
-        // Dormido: el botón A abre el menú (utilidad, no lo despierta);
-        // molestarlo con los otros controles da enojo nocturno (§1.3).
-        if (appState == AppState::SLEEPING) {
-            if (ev == InputEvent::BTN_A_PRESS) {
-                appState  = AppState::MENU;
-                menuPagina = 1;  // reiniciar en página 1
-                ajustesSel = 0;
-                menuHasta = ahora + MENU_TIMEOUT_MS;
-                sound.play(Melody::BIP);
-            } else if (evActiva(ev)) {
-                // El arcade se puede abrir a cualquier hora: es la función
-                // principal del aparato, no tiene sentido que el horario
-                // nocturno de la mascota la bloquee.
-                appState = AppState::ARCADE;
-                arcade.enter(ahora);
-            } else {
-                personality.event(PersEvent::ENOJO_NOCTURNO);
-                face.setExpression(Expression::ENOJADO);
-                sound.play(Melody::ENOJADO);
-                caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
-            }
-            continue;
-        }
-
-        // En el menú: botón navega páginas; los toques dependen de la página.
-        if (appState == AppState::MENU) {
-
-            // ── Overlay de confirmación de renacer: intercepta todo ──
-            if (renacerConfirmando) {
-                if (ev == InputEvent::BTN_A_PRESS) {
-                    renacerConfirmando = false;
-                    sound.play(Melody::BIP);
-                    menuHasta = ahora + MENU_TIMEOUT_MS;
-                    Serial.println("[app] renacer cancelado (boton A)");
-                } else if (evActiva(ev)) {
-                    // Segunda pulsación deliberada: CONFIRMAR renacer
-                    renacerConfirmando = false;
-                    time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
-                    personality.renacer(nowEpoch);
-                    mood.reset();
-                    menuPagina = 1;
-                    ajustesSel = 0;
-                    dispararNacimiento(ahora);
-                    Serial.println("[app] renacer CONFIRMADO — animacion nacimiento");
-                }
-                // El resto de los eventos se ignora durante la confirmación
-                continue;
-            }
-
-            if (ev == InputEvent::BTN_A_PRESS) {
-                if (menuPagina < 4) {
-                    // Avanzar de página
-                    menuPagina++;
-                    menuHasta = ahora + MENU_TIMEOUT_MS;
-                    sound.play(Melody::BIP);
-                } else {
-                    // Última página: cerrar el menú
-                    appState = AppState::IDLE;
-                    idleExprActual = caraDeReposo();
-                    face.setExpression(idleExprActual);
-                    sound.play(Melody::BIP);
-                    marcarActividad(ahora);
-                    entroADormirMs = ahora;
-                }
-            } else {
-                // Acciones según la página: B (o la palanca) mueve el cursor,
-                // C (o el pulsador de la palanca) activa.
-                if (menuPagina == 3) {
-                    // Página 3: activar instala la actualización OTA (si hay)
-                    if (evActiva(ev) && ota.hayActualizacion()) {
-                        sound.play(Melody::BIP);
-                        ota.instalarAhora();
-                        // Si vuelve acá, la instalación falló: cerrar limpio
-                        appState = AppState::IDLE;
-                        idleExprActual = caraDeReposo();
-                        face.setExpression(idleExprActual);
-                        marcarActividad(ahora);
-                        entroADormirMs = ahora;
-                    }
-                } else if (menuPagina == 4) {
-                    // Página 4 (Ajustes): cursor y activación.
-                    if (evMueveCursor(ev)) {
-                        // Arriba retrocede, abajo/botón B avanzan (3 opciones)
-                        if (ev == InputEvent::JOY_UP) ajustesSel = (ajustesSel + 2) % 3;
-                        else                          ajustesSel = (ajustesSel + 1) % 3;
-                        sound.play(Melody::BIP);
-                        menuHasta = ahora + MENU_TIMEOUT_MS;
-                    } else if (evActiva(ev)) {
-                        menuHasta = ahora + MENU_TIMEOUT_MS;
-                        if (ajustesSel == 0) {
-                            // Sonido on/off
-                            bool nuevo = !sound.enabled();
-                            sound.setEnabled(nuevo);
-                            Serial.printf("[app] ajustes: sonido %s\n", nuevo ? "ON" : "OFF");
-                            if (nuevo) sound.play(Melody::BIP);
-                        } else if (ajustesSel == 1) {
-                            // Renacer: pedir confirmación (overlay)
-                            renacerConfirmando  = true;
-                            renacerTimeoutHasta = ahora + MENU_RENACER_CONFIRM_MS;
-                            sound.play(Melody::BIP);
-                            Serial.println("[app] renacer: aguardando confirmacion (C=si, A=no)");
-                        } else {
-                            // Cambiar WiFi: cerrar menú y abrir portal
-                            appState = AppState::IDLE;
-                            idleExprActual = caraDeReposo();
-                            face.setExpression(idleExprActual);
-                            marcarActividad(ahora);
-                            entroADormirMs = ahora;
-                            net.startPortal();
-                            sound.play(Melody::BIP);
-                            reaccionar(Expression::SORPRENDIDO, 3000, "portal: Ramoncito-setup", ahora);
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-
-        // NACIENDO: ignorar toda interacción durante la animación
-        if (appState == AppState::NACIENDO) {
-            continue;
-        }
-
-        // NOTIF: cualquier interacción cierra el aviso. El loop mostrará el
-        // siguiente de la cola si queda alguno; si no, vuelve a la vida normal.
-        if (appState == AppState::NOTIF) {
-            appState = (notifVolverA == AppState::STANDBY) ? AppState::IDLE : notifVolverA;
-            idleExprActual = caraDeReposo();
-            face.setExpression(idleExprActual);
-            marcarActividad(ahora);
-            entroADormirMs = ahora;
-            sound.play(Melody::BIP);
-            continue;
-        }
+        // ENCENDIENDO: ignorar toda interacción durante la animación
+        if (appState == AppState::ENCENDIENDO) continue;
 
         // ── ARCADE ───────────────────────────────────────────────
         // Todos los controles pasan al módulo del arcade, que tiene su
-        // propia máquina de estados. Sale por su propia decisión (botón A
-        // en el menú, opción SALIR, o inactividad).
+        // propia máquina de estados y decide cuándo salir.
         if (appState == AppState::ARCADE) {
             arcade.handleEvent(ev, ahora);
             if (arcade.quiereSalir()) {
-                appState = AppState::IDLE;
-                idleExprActual = caraDeReposo();
-                face.setExpression(idleExprActual);
-                marcarActividad(ahora);
-                entroADormirMs = ahora;
+                volverAlIdle(ahora);
                 Serial.println("[app] arcade -> IDLE");
             }
             continue;
         }
 
+        // ── MENÚ DE SISTEMA ──────────────────────────────────────
+        if (appState == AppState::MENU) {
+            menuHasta = ahora + MENU_TIMEOUT_MS;
+
+            if (ev == InputEvent::BTN_A_PRESS) {
+                if (menuPagina < MENU_PAGINAS) {
+                    menuPagina++;
+                    sound.play(Melody::BIP);
+                } else {
+                    volverAlIdle(ahora);
+                    sound.play(Melody::BIP);
+                }
+            } else if (menuPagina == 1) {
+                // Página de info: la única acción es instalar el update
+                // pendiente, si es que hay uno.
+                if (evActiva(ev) && ota.hayActualizacion()) {
+                    sound.play(Melody::BIP);
+                    ota.instalarAhora();   // bloqueante; reinicia si sale bien
+                    volverAlIdle(ahora);   // si volvió acá, falló
+                }
+            } else {
+                // Página de ajustes
+                if (evMueveCursor(ev)) {
+                    if (ev == InputEvent::JOY_UP)
+                        ajustesSel = (ajustesSel + MENU_AJUSTES_OPTS - 1) % MENU_AJUSTES_OPTS;
+                    else
+                        ajustesSel = (ajustesSel + 1) % MENU_AJUSTES_OPTS;
+                    sound.play(Melody::BIP);
+                } else if (evActiva(ev)) {
+                    if (ajustesSel == 0) {
+                        bool nuevo = !sound.enabled();
+                        sound.setEnabled(nuevo);
+                        Serial.printf("[app] ajustes: sonido %s\n", nuevo ? "ON" : "OFF");
+                        if (nuevo) sound.play(Melody::BIP);
+                    } else {
+                        volverAlIdle(ahora);
+                        net.startPortal();
+                        sound.play(Melody::BIP);
+                        reaccionar(Expression::SORPRENDIDO, 3000,
+                                   "portal: Ramoncito-setup", ahora);
+                    }
+                }
+            }
+            continue;
+        }
+
         // ── IDLE / REACTING ──────────────────────────────────────
-        // A abre el menú de sistema; C (o el pulsador de la palanca)
-        // entra al arcade. B queda como el "sin función" que bipea.
+        // C entra al arcade, que es la función principal del aparato.
+        // A abre el menú de sistema. B no tiene destino todavía: bipea,
+        // para que se note que llega al firmware.
         if (evActiva(ev)) {
             marcarActividad(ahora);
             randExprActiva = false;
             appState = AppState::ARCADE;
             arcade.enter(ahora);
-            continue;
-        }
-
-        if (ev == InputEvent::BTN_A_PRESS) {
+        } else if (ev == InputEvent::BTN_A_PRESS) {
             marcarActividad(ahora);
-            randExprActiva  = false;
+            randExprActiva = false;
             appState   = AppState::MENU;
-            menuPagina = 1;  // reiniciar en página 1
+            menuPagina = 1;
             ajustesSel = 0;
             menuHasta  = ahora + MENU_TIMEOUT_MS;
             sound.play(Melody::BIP);
         } else {
-            // Sin función asignada todavía, pero contestan igual: un bip
-            // deja claro que el botón llega al firmware. Sin esto, un botón
-            // recién cableado y uno roto se ven exactamente igual.
             marcarActividad(ahora);
             sound.play(Melody::BIP);
         }
@@ -581,32 +303,22 @@ static void despacharEventos(uint32_t ahora) {
 
 // ------------------------------------------------------------
 static void imprimirEstado() {
-    Serial.printf("[info] FW %s | estado:%d | F:%u E:%u A:%u | hora:%d noche:%d horaValida:%d portal:%d | sonido:%d\n",
+    Serial.printf("[info] FW %s | estado:%d | hora:%d horaValida:%d portal:%d | sonido:%d | heap:%lu\n",
                   FW_VERSION, (int)appState,
-                  mood.happiness(), mood.energy(), mood.boredom(),
-                  net.hourNow(), net.isNight(), net.timeValid(), net.portalActive(),
-                  sound.enabled());
+                  net.hourNow(), net.timeValid(), net.portalActive(),
+                  sound.enabled(), (unsigned long)ESP.getFreeHeap());
     Serial.printf("[joy] %s | X:%u(c%u)=%.2f Y:%u(c%u)=%.2f | btn A:%d B:%d C:%d SW:%d\n",
                   input.joystickPresente() ? "hw" : "stub",
                   input.rawX(), input.centroX(), input.axisX(),
                   input.rawY(), input.centroY(), input.axisY(),
                   input.btnA(), input.btnB(), input.btnC(), input.joySw());
-    Serial.printf("[pers] animo:%u energia:%u | edad:%d dias | factor:%.2f\n",
-                  personality.animo(), personality.energia(),
-                  personality.edadDias(), personality.plasticidadFactor());
 }
 
 static void procesarComando(const char* cmd) {
     if (cmd[0] == 'h') {
         int h = atoi(cmd + 1);
         net.forceHour(h);
-        Serial.printf("[cmd] hora forzada: %d (isNight=%d)\n", h, net.isNight());
-    } else if (cmd[0] == 'm') {
-        int f, e, a;
-        if (sscanf(cmd + 1, "%d %d %d", &f, &e, &a) == 3) {
-            mood.set((uint8_t)f, (uint8_t)e, (uint8_t)a);
-            Serial.printf("[cmd] mood fijado F:%d E:%d A:%d\n", f, e, a);
-        }
+        Serial.printf("[cmd] hora forzada: %d\n", h);
     } else if (cmd[0] == 's') {
         sound.setEnabled(!sound.enabled());
         Serial.printf("[cmd] sonido: %d\n", sound.enabled());
@@ -616,38 +328,23 @@ static void procesarComando(const char* cmd) {
     } else if (cmd[0] == 'i') {
         imprimirEstado();
     } else if (cmd[0] == 'n') {
-        // Alternar menú (equivale a apretar un botón)
         if (appState == AppState::MENU) {
-            appState = AppState::IDLE;
-            face.setExpression(caraDeReposo());
+            volverAlIdle(millis());
         } else {
-            appState  = AppState::MENU;
-            menuPagina = 1;  // reiniciar en página 1
+            appState   = AppState::MENU;
+            menuPagina = 1;
             ajustesSel = 0;
-            menuHasta = millis() + MENU_TIMEOUT_MS;
+            menuHasta  = millis() + MENU_TIMEOUT_MS;
         }
         Serial.printf("[cmd] menu: %d\n", appState == AppState::MENU);
-    } else if (cmd[0] == 'q') {
-        int an, en;
-        if (sscanf(cmd + 1, "%d %d", &an, &en) == 2) {
-            // q A E → fija los dos ejes (animo, energia)
-            personality.set((uint8_t)an, (uint8_t)en);
-            Serial.printf("[cmd] personalidad fijada animo:%d energia:%d\n", an, en);
-        } else {
-            // q solo → imprime ejes + edad + factor
-            Serial.printf("[pers] animo:%u energia:%u | edad:%d dias | factor:%.2f\n",
-                          personality.animo(), personality.energia(),
-                          personality.edadDias(), personality.plasticidadFactor());
-        }
     } else if (cmd[0] == 'u') {
-        // Forzar chequeo de auto-OTA inmediatamente
         ota.forzarChequeo();
         Serial.println("[cmd] chequeo OTA forzado");
     } else if (cmd[0] == 'k') {
         // Escaneo de pines: pone en INPUT_PULLUP todos los pines libres del
         // XIAO e imprime el nivel de cada uno. Sirve para descubrir en qué
-        // GPIO está cableado un botón sin tener que seguir el cable a ojo:
-        // el que aparezca en 0 mientras lo mantenés apretado es ese.
+        // GPIO está cableado un botón sin seguir el cable a ojo: el que
+        // aparezca en 0 mientras se lo mantiene apretado es ese.
         // Se saltean los ejes de la palanca si está montada, para no pisar
         // el ADC con un pull-up.
         char linea[192];
@@ -660,8 +357,8 @@ static void procesarComando(const char* cmd) {
         }
         Serial.println(linea);
     } else if (cmd[0] == 'v') {
-        // Modo vigilancia on/off. Con esto no hace falta acertarle al momento
-        // de la pulsación: cualquier flanco en cualquier pin queda impreso.
+        // Vigilancia on/off. Con esto no hace falta acertarle al momento de
+        // la pulsación: cualquier flanco en cualquier pin queda impreso.
         pinWatch = !pinWatch;
         if (pinWatch) {
             for (uint8_t i = 0; i < PIN_DIAG_N; i++) {
@@ -685,7 +382,6 @@ static void procesarComando(const char* cmd) {
         }
         Serial.printf("[cmd] palanca stub: %c\n", cmd[0]);
     } else if (cmd[0] == '1' || cmd[0] == '2' || cmd[0] == '3' || cmd[0] == 'z') {
-        // Botones por serial: sirve para probar sin tenerlos cableados.
         InputEvent ev = (cmd[0] == '1') ? InputEvent::BTN_A_PRESS  :
                         (cmd[0] == '2') ? InputEvent::BTN_B_PRESS  :
                         (cmd[0] == '3') ? InputEvent::BTN_C_PRESS  :
@@ -712,7 +408,7 @@ void setup() {
     delay(1500);
 
     Serial.println("=========================================");
-    Serial.printf ("  Ramoncito boot OK | FW: %s\n", FW_VERSION);
+    Serial.printf ("  Ramoncito arcade | FW: %s\n", FW_VERSION);
     Serial.println("=========================================");
 
     pinMode(PIN_LED, OUTPUT);
@@ -727,27 +423,20 @@ void setup() {
     u8g2.setBusClock(I2C_CLOCK_HZ);
 
     sound.begin();
-    mood.begin();
-    personality.begin();
     input.begin();
     arcade.begin();
     face.begin();
     imu.begin();   // requiere Wire ya iniciado; falla silenciosamente si no hay MPU
     net.begin();
     ota.begin(&u8g2);
-    telegram.begin();
-
-    idleExprActual = caraDeReposo();
-    face.setExpression(idleExprActual);
-    sound.play(Melody::BOOT);
 
     uint32_t ahora = millis();
     marcarActividad(ahora);
     scheduleGuino(ahora);
     scheduleSospechoso(ahora);
-    sigMuestraPers = ahora + MOOD_TICK_MS / TIME_SCALE;
+    dispararEncendido(ahora);
 
-    Serial.println("[app] listo — comandos: h N | m F E A | s | p | i | n | q | q A E | u (OTA)");
+    Serial.println("[app] listo — comandos: h N | s | p | i | n | u | k | v");
     Serial.println("[app] test de controles: 1/2/3 = botones A/B/C | z = pulsador palanca | w/x/a/d = palanca");
 }
 
@@ -759,8 +448,7 @@ void loop() {
     leerSerial();
 
     // Vigilancia de pines: corre antes del gate de frame, así muestrea a la
-    // velocidad del loop (miles de veces por segundo) y no se le escapa una
-    // pulsación corta. Solo imprime cuando algo cambia.
+    // velocidad del loop y no se le escapa una pulsación corta.
     if (pinWatch) {
         for (uint8_t i = 0; i < PIN_DIAG_N; i++) {
             if (JOYSTICK_PRESENTE && (PIN_DIAG[i] == PIN_JOY_X || PIN_DIAG[i] == PIN_JOY_Y)) continue;
@@ -774,9 +462,6 @@ void loop() {
         }
     }
 
-    // (El LED de latido de la Etapa 0 quedó desactivado a pedido del
-    //  usuario; el pin queda en HIGH = apagado desde setup().)
-
     if (ahora - ultimoFrame < FRAME_MS) return;
     ultimoFrame = ahora;
     framesEnVentana++;
@@ -784,209 +469,13 @@ void loop() {
     // Módulos de fondo
     imu.update(ahora);
     net.update(ahora);
+    sound.update(ahora);
 
     // Auto-OTA: solo fuera del menú y del arcade. El chequeo es bloqueante y
     // pisaría el render con la pantalla de progreso; en medio de una partida
-    // eso es un frame congelado de varios segundos. En IDLE o SLEEPING no
-    // molesta a nadie.
+    // eso es un frame congelado de varios segundos.
     if (appState != AppState::MENU && appState != AppState::ARCADE) {
         ota.update(ahora);
-    }
-
-    // Descansando = sueño nocturno, standby (pantalla apagada por inactividad)
-    // o siesta por agotamiento (cara DORMIDO): en vez de decaer, recupera
-    // energía de a poco. Sin STANDBY la energía caía a 0 tras un día sin uso.
-    bool descansando = (appState == AppState::SLEEPING) ||
-                       (appState == AppState::STANDBY) ||
-                       (appState == AppState::IDLE && idleExprActual == Expression::DORMIDO);
-    mood.update(ahora, descansando);
-    personality.update(ahora);
-    sound.update(ahora);
-
-    // ── Panel web en la LAN ─────────────────────────────────────
-    // Refrescar el snapshot que lee el dashboard (barato, cada frame).
-    {
-        WebData wd;
-        wd.felicidad    = mood.happiness();
-        wd.energia      = mood.energy();
-        wd.aburrimiento = mood.boredom();
-        wd.animo        = personality.animo();
-        wd.energia_pers = personality.energia();
-        wd.edadDias     = personality.edadDias();
-        wd.sonido       = sound.enabled();
-        wd.hayUpdate    = ota.hayActualizacion();
-        snprintf(wd.fwVersion,    sizeof(wd.fwVersion),    "%s", FW_VERSION);
-        snprintf(wd.versionNueva, sizeof(wd.versionNueva), "%s", ota.versionNueva());
-        snprintf(wd.expresion,    sizeof(wd.expresion),    "%s", nombreExpresion(idleExprActual));
-        net.setWebData(wd);
-    }
-
-    // Acciones disparadas desde el panel web (se ejecutan acá, fuera del
-    // handler HTTP, para no bloquear ni reiniciar en medio de la respuesta).
-    switch (net.takeWebAction()) {
-        case WebAction::TOGGLE_SONIDO:
-            sound.setEnabled(!sound.enabled());
-            Serial.printf("[web] sonido: %s\n", sound.enabled() ? "ON" : "OFF");
-            if (sound.enabled()) sound.play(Melody::BIP);
-            break;
-        case WebAction::OTA_CHECK:
-            Serial.println("[web] chequeo OTA forzado");
-            ota.forzarChequeo();
-            break;
-        case WebAction::OTA_INSTALL:
-            if (ota.hayActualizacion()) {
-                Serial.println("[web] instalando OTA desde el panel");
-                ota.instalarAhora();   // bloqueante + reinicio si OK
-            }
-            break;
-        case WebAction::ABRIR_PORTAL:
-            Serial.println("[web] abriendo portal WiFi desde el panel");
-            net.startPortal();
-            break;
-        case WebAction::RENACER: {
-            Serial.println("[web] RENACER confirmado desde el panel");
-            time_t nowEpoch = net.timeValid() ? time(nullptr) : 0;
-            personality.renacer(nowEpoch);
-            mood.reset();
-            menuPagina = 1;
-            ajustesSel = 0;
-            renacerConfirmando = false;
-            dispararNacimiento(ahora);
-            break;
-        }
-        case WebAction::NINGUNA:
-        default:
-            break;
-    }
-
-    // ── Telegram: mensajes entrantes + comandos ─────────────────
-    // La red de Telegram corre en una tarea de fondo (core 0); acá solo
-    // consumimos lo que dejó (comandos/preguntas/":::"), sin bloquear.
-    {
-        switch (telegram.tomarComando()) {
-            case Telegram::Cmd::ESTADO: {
-                char m[128];
-                snprintf(m, sizeof(m),
-                    "Estoy %s \xF0\x9F\x90\xB9\nFelicidad %u | Energia %u | Aburrimiento %u\nEdad: %d dias",
-                    nombreExpresion(idleExprActual),
-                    mood.happiness(), mood.energy(), mood.boredom(), personality.edadDias());
-                telegram.enviar(m);
-                break;
-            }
-            case Telegram::Cmd::FELIZ:
-                mood.apply(MoodEffect::CARICIA);
-                personality.event(PersEvent::CARICIA);
-                if (appState == AppState::IDLE || appState == AppState::REACTING) {
-                    sound.play(Melody::AMOR);
-                    reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora);
-                }
-                break;
-            case Telegram::Cmd::SONIDO:
-                sound.setEnabled(!sound.enabled());
-                telegram.enviar(sound.enabled() ? "sonido ON \xF0\x9F\x94\x8A" : "sonido OFF \xF0\x9F\x94\x87");
-                if (sound.enabled()) sound.play(Melody::BIP);
-                break;
-            case Telegram::Cmd::NINGUNO:
-            default:
-                break;
-        }
-
-        // ":::" — mostrar el texto en la pantalla (notify.push lo hace main,
-        // así la cola de avisos la toca un solo hilo).
-        char mbuf[161];
-        if (telegram.tomarMostrar(mbuf, sizeof(mbuf))) {
-            notify.push("", mbuf, NotifIcon::CHAT);
-        }
-
-        // Pregunta de texto libre: responder en personaje + poner cara acorde.
-        char qbuf[161];
-        if (telegram.tomarMensaje(qbuf, sizeof(qbuf))) {
-            Expression rx = Expression::FELIZ;
-            String resp = responder(qbuf, rx);
-            telegram.enviar(resp.c_str());
-            // Reacción en la cara (no interrumpe menú/nacimiento; de noche no despierta)
-            if (appState == AppState::STANDBY) { u8g2.setPowerSave(0); appState = AppState::IDLE; }
-            if (appState == AppState::IDLE || appState == AppState::REACTING ||
-                appState == AppState::NOTIF) {
-                Melody mel = (rx == Expression::AMOR)    ? Melody::AMOR :
-                             (rx == Expression::RISA)    ? Melody::RISA :
-                             (rx == Expression::ENOJADO) ? Melody::ENOJADO :
-                             (rx == Expression::FELIZ || rx == Expression::ILUSIONADO) ? Melody::FELIZ :
-                             Melody::BIP;
-                sound.play(mel);
-                reaccionar(rx, REACCION_TOUCH_MS, "", ahora);
-            }
-        }
-
-        // Mensajes proactivos (respetan /callar). El flag se marca solo si el
-        // envío salió (enviar() está rate-limited); así reintenta si se descartó.
-        if (telegram.habilitado() && !telegram.silenciado()) {
-            if (mood.energy() < 15 && !tgEnergiaBajaAvisada) {
-                if (telegram.enviar("Tengo poca energia... \xF0\x9F\xA5\xB1 necesito descansar."))
-                    tgEnergiaBajaAvisada = true;
-            } else if (mood.energy() > 35) {
-                tgEnergiaBajaAvisada = false;
-            }
-            if (ota.hayActualizacion() && !tgUpdateAvisado) {
-                char m[96];
-                snprintf(m, sizeof(m),
-                    "Hay una actualizacion nueva (v%s) \xE2\x9C\xA8 instalala cuando quieras.",
-                    ota.versionNueva());
-                if (telegram.enviar(m)) tgUpdateAvisado = true;
-            }
-        }
-    }
-
-    // ── Notificaciones en pantalla ──────────────────────────────
-    // Si hay un aviso en cola y el estado lo permite, mostrarlo (enciende la
-    // pantalla si estaba en standby). No interrumpe menú/nacimiento/reacción.
-    // El arcade también queda excluido: cortar una partida a la mitad con un
-    // aviso de Telegram sería la peor forma de perder un punto.
-    if (notify.hayPendiente() &&
-        appState != AppState::MENU && appState != AppState::NACIENDO &&
-        appState != AppState::REACTING && appState != AppState::NOTIF &&
-        appState != AppState::ARCADE) {
-        notifVolverA = appState;
-        if (appState == AppState::STANDBY) u8g2.setPowerSave(0);  // encender pantalla
-        notify.pop(notifActual);
-        notifDesde = ahora;
-        appState = AppState::NOTIF;
-        marcarActividad(ahora);
-        sound.play(Melody::SORPRESA);
-    }
-    // Auto-cierre del aviso tras NOTIF_AUTO_MS (si no lo tocaron antes).
-    if (appState == AppState::NOTIF && (ahora - notifDesde) >= NOTIF_AUTO_MS) {
-        appState = (notifVolverA == AppState::STANDBY) ? AppState::IDLE : notifVolverA;
-        idleExprActual = caraDeReposo();
-        face.setExpression(idleExprActual);
-        marcarActividad(ahora);
-        entroADormirMs = ahora;
-    }
-
-    // Hora recién validada -> decaimiento offline (una sola vez)
-    if (net.justGotValidTime()) {
-        time_t nowEpoch = time(nullptr);
-        mood.applyOfflineDecay(nowEpoch);
-        mood.noteTimeValid(nowEpoch);
-        // Si el juguete aún no tenía fecha de nacimiento, esta es la primera
-        // vez que se conoce la hora → registrar nacimiento y animar.
-        bool eraSinNacimiento = (personality.edadDias() < 0);
-        personality.noteTimeValid(nowEpoch);
-        if (eraSinNacimiento && personality.edadDias() >= 0 &&
-            appState == AppState::IDLE) {
-            // Primera hora válida: disparar animación de nacimiento
-            dispararNacimiento(ahora);
-        }
-    }
-
-    // Muestreo pasivo de personalidad: cada tick de humor, solo en IDLE
-    // (despierto o siesta diurna). El sueño nocturno (SLEEPING) no cuenta.
-    if (appState != AppState::SLEEPING &&
-        appState != AppState::MENU &&
-        appState != AppState::STANDBY &&
-        (int32_t)(ahora - sigMuestraPers) >= 0) {
-        sigMuestraPers = ahora + MOOD_TICK_MS / TIME_SCALE;
-        personality.sampleTick(idleExprActual, descansando);
     }
 
     despacharEventos(ahora);
@@ -995,239 +484,124 @@ void loop() {
     if (appState == AppState::ARCADE) {
         arcade.update(ahora);
         marcarActividad(ahora);   // jugando no se cuenta como estar inactivo
-        if (arcade.quiereSalir()) {
-            appState = AppState::IDLE;
-            idleExprActual = caraDeReposo();
-            face.setExpression(idleExprActual);
-            entroADormirMs = ahora;
-        }
+        if (arcade.quiereSalir()) volverAlIdle(ahora);
     }
 
-    // (El toggle de sonido por long-press se retiró: ahora vive como
-    //  opción de la página 4 · Ajustes.)
+    // ── Eventos del IMU (acelerómetro) ──────────────────────────
+    // Solo fuera del menú y del arcade: sacudir el gabinete jugando al Pong
+    // no debería cambiarte la pantalla.
+    if (appState != AppState::MENU && appState != AppState::ARCADE &&
+        appState != AppState::ENCENDIENDO && imu.habilitado()) {
 
-    // ── Eventos IMU (acelerómetro MPU6050) ──────────────────────
-    // Solo se procesan fuera del MENU (igual que los toques táctiles).
-    if (appState != AppState::MENU && imu.habilitado()) {
-
-        // ── LEVANTADO: reacción según personalidad ───────────────
         if (imu.huboLevantado()) {
             marcarActividad(ahora);
             if (appState == AppState::STANDBY) {
                 salirStandby(ahora);
-            } else if (appState == AppState::SLEEPING) {
-                // Levantado de noche: reacción breve sin despertar del todo
-                face.setExpression(Expression::SORPRENDIDO);
-                sound.play(Melody::BIP);
-                caraNocheHasta = ahora + 1500;
-                Serial.println("[imu] levantado (durmiendo) → SORPRENDIDO breve");
             } else {
-                // Despierto: cara única de "me alzaron" (ILUSIONADO), sin texto.
-                mood.apply(MoodEffect::LEVANTADO);
-                personality.event(PersEvent::LEVANTADO);
                 sound.play(Melody::FELIZ);
                 reaccionar(Expression::ILUSIONADO, REACCION_TOUCH_MS, "", ahora);
                 Serial.println("[imu] levantado → ILUSIONADO");
             }
         }
 
-        // ── SACUDIDA: leve / excesiva según personalidad ─────────
         if (imu.huboSacudida()) {
             marcarActividad(ahora);
             if (appState == AppState::STANDBY) {
                 salirStandby(ahora);
-            } else if (appState == AppState::SLEEPING) {
-                // Sacudida durmiendo: enojo nocturno directo
-                personality.event(PersEvent::ENOJO_NOCTURNO);
-                face.setExpression(Expression::ENOJADO);
+            } else if (imu.sacudidasEnVentana() >= IMU_SACUDIDA_MAX) {
+                // Lo sacudieron de más: se marea. Es una reacción del momento,
+                // no un enojo que quede pegado — no hay forma de pedirle
+                // perdón desde que no hay caricias.
                 sound.play(Melody::ENOJADO);
-                caraNocheHasta = ahora + REACCION_NOCHE_ENOJO_MS;
-                Serial.println("[imu] sacudida (durmiendo) → ENOJADO nocturno");
+                reaccionar(Expression::MAREADO, REACCION_BTN_MS, "", ahora);
+                Serial.printf("[imu] sacudida excesiva (%u) → MAREADO\n",
+                              imu.sacudidasEnVentana());
             } else {
-                // Despierto: umbral de "excesiva" ajustado por personalidad.
-                // Un gruñón se marea con menos sacudidas; un energético aguanta más.
-                bool esGrunon    = Personality::esAlta(personality.grunon());
-                bool esEnergetico = Personality::esAlta(personality.energetico());
-
-                // Calcular umbral efectivo (mínimo 2 para que siempre haya zona "leve")
-                int8_t umbralExcesiva = (int8_t)IMU_SACUDIDA_MAX;
-                if (esGrunon)     umbralExcesiva -= 1;
-                if (esEnergetico) umbralExcesiva += 1;
-                if (umbralExcesiva < 2) umbralExcesiva = 2;
-
-                if (imu.sacudidasEnVentana() >= (uint8_t)umbralExcesiva) {
-                    // Sacudida excesiva → MAREADO + malhumor + sesgo a gruñón
-                    malhumorHasta = ahora + personality.malhumorMs();
-                    mood.apply(MoodEffect::SACUDIDA_EXCESIVA);
-                    personality.event(PersEvent::ENOJO_COSQUILLAS);
-                    sound.play(Melody::ENOJADO);
-                    reaccionar(Expression::MAREADO, REACCION_BTN_MS, "", ahora);
-                    Serial.printf("[imu] sacudida excesiva (%u, umbral=%d) → MAREADO + malhumor\n",
-                                  imu.sacudidasEnVentana(), umbralExcesiva);
-                } else {
-                    // Sacudida leve → sorpresa (sin texto); estimulante, baja aburrimiento
-                    mood.apply(MoodEffect::SACUDIDA_LEVE);
-                    sound.play(Melody::BIP);
-                    reaccionar(Expression::SORPRENDIDO, REACCION_TOUCH_MS, "", ahora);
-                    Serial.printf("[imu] sacudida leve (%u) → SORPRENDIDO%s\n",
-                                  imu.sacudidasEnVentana(), esGrunon ? " (grunon irritado)" : "");
-                }
+                sound.play(Melody::BIP);
+                reaccionar(Expression::SORPRENDIDO, REACCION_TOUCH_MS, "", ahora);
+                Serial.printf("[imu] sacudida leve (%u) → SORPRENDIDO\n",
+                              imu.sacudidasEnVentana());
             }
         }
     }
 
-    // Expiración del malhumor (§1.2)
-    if (malhumorHasta != 0 && (int32_t)(ahora - malhumorHasta) >= 0) {
-        malhumorHasta = 0;
-    }
-
-    // Cara nocturna transitoria: volver a DORMIDO cuando venza (§1.3)
-    if (appState == AppState::SLEEPING && caraNocheHasta != 0
-        && (int32_t)(ahora - caraNocheHasta) >= 0) {
-        face.setExpression(Expression::DORMIDO);
-        caraNocheHasta = 0;
-    }
-
-    // Standby en IDLE por inactividad prolongada
+    // Standby por inactividad prolongada
     if (appState == AppState::IDLE &&
         (ahora - ultimaActividad) >= INACTIVIDAD_STANDBY_MS) {
         entrarStandby();
     }
-    // Standby en SLEEPING después de DORMIDO_STANDBY_MS durmiendo
-    if (appState == AppState::SLEEPING &&
-        (ahora - entroADormirMs) >= DORMIDO_STANDBY_MS) {
-        entrarStandby();
-    }
-    // NACIENDO no puede entrar en standby: ya retorna antes en el bloque de arriba
-
-    // En standby: no hay más lógica ni render
-    if (appState == AppState::STANDBY) {
-        return;
-    }
-
-    // Timeout de confirmación del renacer (sin pie en 6 s → cancelar)
-    if (renacerConfirmando && (int32_t)(ahora - renacerTimeoutHasta) >= 0) {
-        renacerConfirmando = false;
-        Serial.println("[app] renacer cancelado (timeout)");
-    }
+    if (appState == AppState::STANDBY) return;
 
     // Auto-cierre del menú
     if (appState == AppState::MENU && (int32_t)(ahora - menuHasta) >= 0) {
-        appState = AppState::IDLE;
-        menuPagina = 1;  // resetear paginación (Etapa C)
-        renacerConfirmando = false;  // cancelar confirmación pendiente
-        idleExprActual = caraDeReposo();
-        face.setExpression(idleExprActual);
-        marcarActividad(ahora);
-        entroADormirMs  = ahora;  // después del menú, 30 min antes de standby
+        menuPagina = 1;
+        volverAlIdle(ahora);
     }
 
-    // Transiciones dependientes de la hora
-    bool esNoche = net.isNight();
-    bool fueraDeLaGracia = (int32_t)(ahora - standbyGraciaHasta) >= 0;
-    if (appState == AppState::IDLE && esNoche && fueraDeLaGracia) entrarADormir(ahora);
-    else if (appState == AppState::SLEEPING && !esNoche)           despertar(ahora);
-
-    // ── Animación de nacimiento CRT (AppState::NACIENDO) ─────────
-    // Secuencia temporizada no bloqueante de 4 fases (ver config.h):
-    //   Fase 0 [0, F0):              línea horizontal crece (punto→ancho total)
-    //   Fase 1 [F0, F0+F1):          apertura vertical (línea→pantalla llena/flash)
-    //   Fase 2 [F0+F1, F0+F1+F2):   estática CRT (ruido aleatorio)
-    //   Fase 3 [F0+F1+F2, total):    revelado de cara con barrido descendente
-    //   Al terminar → IDLE con FELIZ
-    if (appState == AppState::NACIENDO) {
-        uint32_t t = ahora - nacimientoInicioMs;
-
-        // ── Transiciones de fase ──────────────────────────────────
+    // ── Animación de encendido CRT ───────────────────────────────
+    if (appState == AppState::ENCENDIENDO) {
+        uint32_t t  = ahora - encendidoInicioMs;
         uint32_t t1 = ANIM_NACIMIENTO_F0_MS;
         uint32_t t2 = t1 + ANIM_NACIMIENTO_F1_MS;
         uint32_t t3 = t2 + ANIM_NACIMIENTO_F2_MS;
 
-        if (nacimientoFase == 0 && t >= t1) {
-            nacimientoFase = 1;
-        } else if (nacimientoFase == 1 && t >= t2) {
-            nacimientoFase = 2;
-        } else if (nacimientoFase == 2 && t >= t3) {
-            nacimientoFase = 3;
-            // Sin bip extra: el chirp final de TV_ON ya cubre esta transición.
-        } else if (nacimientoFase == 3 && t >= ANIM_NACIMIENTO_TOTAL_MS) {
-            // Fin de animación → IDLE feliz
-            appState       = AppState::IDLE;
-            idleExprActual = Expression::FELIZ;
-            face.setExpression(idleExprActual);
-            marcarActividad(ahora);
-            entroADormirMs = ahora;
+        if (encendidoFase == 0 && t >= t1)                          encendidoFase = 1;
+        else if (encendidoFase == 1 && t >= t2)                      encendidoFase = 2;
+        else if (encendidoFase == 2 && t >= t3)                      encendidoFase = 3;
+        else if (encendidoFase == 3 && t >= ANIM_NACIMIENTO_TOTAL_MS) {
+            volverAlIdle(ahora);
             scheduleGuino(ahora);
             scheduleSospechoso(ahora);
-            Serial.println("[app] animacion nacimiento CRT completa → IDLE FELIZ");
-            // Caer en el render normal del frame actual (con cara FELIZ)
+            Serial.println("[app] encendido CRT completo → IDLE");
         }
 
-        if (appState == AppState::NACIENDO) {
-            // ── Render custom CRT — NO delegar en face.render() durante fases 0‑2 ──
-            u8g2.clearBuffer();  // pantalla negra base
+        if (appState == AppState::ENCENDIENDO) {
+            // Render propio: durante las fases 0-2 no hay cara que dibujar.
+            u8g2.clearBuffer();
 
-            if (nacimientoFase == 0) {
-                // ── Fase 0: línea horizontal crece desde el centro ────────
-                // Progreso 0.0→1.0 en la duración de la fase
+            if (encendidoFase == 0) {
+                // Fase 0: una línea horizontal crece desde el centro
                 float p = (float)t / (float)ANIM_NACIMIENTO_F0_MS;
                 if (p > 1.0f) p = 1.0f;
-                // Ancho de la línea: de 2 px hasta 128 px
                 int16_t lineaW = (int16_t)(2.0f + p * (128.0f - 2.0f));
-                int16_t lineaX = (128 - lineaW) / 2;  // centrada horizontalmente
-                int16_t lineaY = 32 - (ANIM_NACIMIENTO_LINEA_GROSOR / 2);  // centro vertical
+                int16_t lineaX = (128 - lineaW) / 2;
+                int16_t lineaY = 32 - (ANIM_NACIMIENTO_LINEA_GROSOR / 2);
                 u8g2.setDrawColor(1);
                 u8g2.drawBox(lineaX, lineaY, lineaW, ANIM_NACIMIENTO_LINEA_GROSOR);
 
-            } else if (nacimientoFase == 1) {
-                // ── Fase 1: apertura vertical de línea a pantalla llena ───
-                // Progreso 0.0→1.0 en la duración de la fase 1
+            } else if (encendidoFase == 1) {
+                // Fase 1: la línea se abre en vertical hasta llenar la pantalla
                 float p = (float)(t - t1) / (float)ANIM_NACIMIENTO_F1_MS;
                 if (p > 1.0f) p = 1.0f;
-                // Altura crece de LINEA_GROSOR px hasta 64 px
                 int16_t altBase = ANIM_NACIMIENTO_LINEA_GROSOR;
-                int16_t altMax  = 64;
-                int16_t alt = (int16_t)(altBase + p * (altMax - altBase));
+                int16_t alt = (int16_t)(altBase + p * (64 - altBase));
                 int16_t rectY = 32 - alt / 2;
                 if (rectY < 0) rectY = 0;
                 u8g2.setDrawColor(1);
                 u8g2.drawBox(0, rectY, 128, alt);
 
-            } else if (nacimientoFase == 2) {
-                // ── Fase 2: estática/ruido CRT ───────────────────────────
-                // Fondo negro (ya está limpio); dibujar píxeles aleatorios
+            } else if (encendidoFase == 2) {
+                // Fase 2: estática de sintonía
                 u8g2.setDrawColor(1);
                 for (uint16_t i = 0; i < ANIM_NACIMIENTO_RUIDO_PX; i++) {
-                    int16_t rx = (int16_t)(random(128));
-                    int16_t ry = (int16_t)(random(64));
-                    u8g2.drawPixel(rx, ry);
+                    u8g2.drawPixel((int16_t)random(128), (int16_t)random(64));
                 }
-                // Algunas scanlines horizontales tenues (filas completas esparcidas)
                 for (uint8_t fila = 4; fila < 64; fila += 8) {
-                    if (random(3) == 0) {  // 1 de cada 3 → aspecto irregular
-                        u8g2.drawHLine(0, fila, 128);
-                    }
+                    if (random(3) == 0) u8g2.drawHLine(0, fila, 128);
                 }
 
             } else {
-                // ── Fase 3: revelado de cara con barrido descendente ──────
-                // face ya tiene setExpression(FELIZ) desde dispararNacimiento.
-                // Actualizamos la animación interna de la cara.
+                // Fase 3: la cara se revela con un barrido descendente
                 face.update(ahora);
-                // Renderizar la cara completa en el buffer
                 face.render(u8g2);
-                // Tapar la parte inferior que aún no se reveló con un rectángulo negro.
-                // Progreso 0.0 (todo tapado) → 1.0 (cara completa).
                 float p = (float)(t - t3) / (float)ANIM_NACIMIENTO_F3_MS;
                 if (p > 1.0f) p = 1.0f;
-                // La "cortina" negra baja: su borde superior empieza en y=0 y baja a y=64.
-                int16_t reveladoY = (int16_t)(p * 64.0f);  // línea de revelado (0→64)
+                int16_t reveladoY = (int16_t)(p * 64.0f);
                 if (reveladoY < 64) {
-                    // Tapar las filas que aún no se revelan (debajo de la línea de barrido)
                     u8g2.setDrawColor(0);
                     u8g2.drawBox(0, reveladoY, 128, 64 - reveladoY);
                 }
-                u8g2.setDrawColor(1);  // restaurar color de dibujo
+                u8g2.setDrawColor(1);
             }
 
             u8g2.sendBuffer();
@@ -1236,37 +610,29 @@ void loop() {
     }
 
     // Fin de reacción
-    if (appState == AppState::REACTING) {
-        bool vencida = (int32_t)(ahora - reaccionHasta) >= 0;
-        if (vencida) {
-            reaccionLabel = "";
-            if (esNoche) {
-                entrarADormir(ahora);
-            } else {
-                appState = AppState::IDLE;
-                idleExprActual = caraDeReposo();
-                face.setExpression(idleExprActual);
-                scheduleGuino(ahora);
-                scheduleSospechoso(ahora);
-            }
-        }
+    if (appState == AppState::REACTING &&
+        (int32_t)(ahora - reaccionHasta) >= 0) {
+        reaccionLabel = "";
+        volverAlIdle(ahora);
+        scheduleGuino(ahora);
+        scheduleSospechoso(ahora);
     }
 
-    // Expresiones aleatorias durante IDLE (no durante siesta — cara DORMIDO)
-    if (appState == AppState::IDLE && idleExprActual != Expression::DORMIDO) {
+    // ── Gestos ocasionales durante el idle ───────────────────────
+    // Es de acá que sale la vida de la carita ahora que no hay humor:
+    // guiños cada tanto y una mirada de "¿qué pasa?" si nadie la usa.
+    if (appState == AppState::IDLE) {
         if (randExprActiva) {
-            // Terminar expresión aleatoria y restaurar idle
             if ((int32_t)(ahora - randExprHasta) >= 0) {
                 face.setExpression(idleExprActual);
                 randExprActiva = false;
             }
         } else {
-            // "Qué pasa" determinista: cada 30 min de inactividad continua (§1.4)
             bool quePasaDisparar = (sigQuePasa != 0) && ((int32_t)(ahora - sigQuePasa) >= 0);
 
             if ((int32_t)(ahora - sigGuino) >= 0) {
                 randExprActiva = true;
-                randExprHasta = ahora + RAND_EXPR_DUR_MS;
+                randExprHasta  = ahora + RAND_EXPR_DUR_MS;
                 face.setExpression(Expression::GUINO);
                 scheduleGuino(ahora + RAND_EXPR_DUR_MS);
             } else if (quePasaDisparar || (int32_t)(ahora - sigSospechoso) >= 0) {
@@ -1274,48 +640,25 @@ void loop() {
                 uint32_t dur = quePasaDisparar ? QUEHACER_EXPR_DUR_MS : RAND_EXPR_DUR_MS;
                 randExprHasta = ahora + dur;
                 face.setExpression(Expression::SOSPECHOSO);
-                if (quePasaDisparar) {
-                    // Avanzar al siguiente múltiplo de 30 min de inactividad
-                    sigQuePasa += INACTIVIDAD_QUEHACER_MS;
-                } else {
-                    scheduleSospechoso(ahora + dur);
-                }
-            } else {
-                // Volver al reposo si quedó otra expresión colgada. Ya no hay
-                // override de malhumor: agitarlo da una reacción visible en el
-                // momento, pero no lo deja enojado durante un minuto — eso era
-                // un estado de ánimo persistente que el usuario no podía
-                // revertir de ninguna forma.
-                if (idleExprActual != caraDeReposo()) {
-                    idleExprActual = caraDeReposo();
-                    face.setExpression(idleExprActual);
-                }
+                if (quePasaDisparar) sigQuePasa += INACTIVIDAD_QUEHACER_MS;
+                else                 scheduleSospechoso(ahora + dur);
+            } else if (idleExprActual != caraDeReposo()) {
+                idleExprActual = caraDeReposo();
+                face.setExpression(idleExprActual);
             }
         }
-    }
-
-    // Ronquido periódico durmiendo — solo durante los primeros
-    // RONQUIDO_VENTANA_MS tras quedarse dormido (no se repite para siempre).
-    if (appState == AppState::SLEEPING
-        && (ahora - entroADormirMs) < RONQUIDO_VENTANA_MS
-        && (int32_t)(ahora - proximoRonquido) >= 0) {
-        sound.play(Melody::RONQUIDO);
-        proximoRonquido = ahora + 2500 + (esp_random() % 1000);
     }
 
     // Animar la cara
     face.update(ahora);
 
-    // Render
+    // ── Render ───────────────────────────────────────────────────
     u8g2.clearBuffer();
     if (appState == AppState::MENU) {
         MenuData md;
-        md.felicidad       = mood.happiness();
-        md.energia         = mood.energy();
-        md.aburrimiento    = mood.boredom();
-        md.horaValida      = net.timeValid();
+        md.horaValida = net.timeValid();
         md.hora = md.minuto = 0;
-        md.dia = md.mes = md.diaSemana = 0;
+        md.dia  = md.mes = md.diaSemana = 0;
         if (md.horaValida) {
             struct tm ti;
             if (getLocalTime(&ti, 10)) {
@@ -1329,36 +672,24 @@ void loop() {
         md.wifiConfigurada = net.hasCredentials();
         md.ssid            = net.ssidGuardado();
         md.portalActivo    = net.portalActive();
-        // Campos de firmware / OTA (página 3)
-        md.fwVersion         = FW_VERSION;
-        md.staConectada      = net.staConnected();
-        md.hayUpdate         = ota.hayActualizacion();
-        md.versionNueva      = ota.versionNueva();
-        md.sonidoHabilitado  = sound.enabled();
-        // Panel web en la LAN: dirección para conectarse desde el teléfono.
+        md.staConectada    = net.staConnected();
         // Buffer local: vive hasta que menuRender() retorna (mismo scope).
         char lanIpBuf[20];
         snprintf(lanIpBuf, sizeof(lanIpBuf), "%s", net.lanIP().c_str());
-        md.lanServerActivo   = net.lanServerActivo();
-        md.lanIP             = lanIpBuf;
-        // Personalidad — 2 ejes (alegre=ánimo, energetico=energía)
-        md.alegre      = personality.animo();
-        md.energetico  = personality.energia();
-        md.edadDias    = personality.edadDias();
-        // Sub-estado de confirmación de renacer (overlay)
-        md.renacerConfirmando = renacerConfirmando;
-        // Página 4 · Ajustes
-        md.ajustesSel  = ajustesSel;
+        md.lanIP           = lanIpBuf;
+        md.fwVersion       = FW_VERSION;
+        md.hayUpdate       = ota.hayActualizacion();
+        md.versionNueva    = ota.versionNueva();
+        md.sonidoHabilitado= sound.enabled();
+        md.ajustesSel      = ajustesSel;
         menuRender(u8g2, md, menuPagina);
     } else if (appState == AppState::ARCADE) {
         arcade.render(u8g2);
-    } else if (appState == AppState::NOTIF) {
-        notify.render(u8g2, notifActual, ahora, notifDesde);
     } else {
         face.render(u8g2);
         if (appState == AppState::REACTING && reaccionLabel[0] != '\0') {
             u8g2.setFont(u8g2_font_5x7_tf);
-            u8g2.drawStr(2, 8, reaccionLabel);  // arriba: baseline y=8, pegado a la izquierda
+            u8g2.drawStr(2, 8, reaccionLabel);
         }
     }
     u8g2.sendBuffer();
@@ -1368,10 +699,9 @@ void loop() {
         ultimoLog = ahora;
         fpsActual = framesEnVentana * 1000 / INTERVALO_LOG_MS;
         framesEnVentana = 0;
-        Serial.printf("Ramoncito | fps:%lu heap:%lu | F:%u E:%u A:%u | hora:%d noche:%d | est:%d | joy:%.2f,%.2f\n",
+        Serial.printf("Ramoncito | fps:%lu heap:%lu | hora:%d | est:%d | joy:%.2f,%.2f\n",
                       (unsigned long)fpsActual, (unsigned long)ESP.getFreeHeap(),
-                      mood.happiness(), mood.energy(), mood.boredom(),
-                      net.hourNow(), esNoche, (int)appState,
+                      net.hourNow(), (int)appState,
                       input.axisX(), input.axisY());
     }
 }

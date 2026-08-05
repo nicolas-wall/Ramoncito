@@ -8,33 +8,10 @@
 #include <Arduino.h>
 #include <time.h>
 
-// Snapshot de estado que main.cpp refresca cada frame para el panel web de la
-// LAN (mismo patrón que MenuData del menú del OLED). Solo lectura desde los
-// handlers HTTP; se copia por valor, sin punteros que puedan quedar colgados.
-struct WebData {
-    uint8_t felicidad   = 0;
-    uint8_t energia     = 0;
-    uint8_t aburrimiento= 0;
-    uint8_t animo       = 50;   // 0 gruñón .. 100 alegre
-    uint8_t energia_pers= 50;   // 0 perezoso .. 100 energético
-    int     edadDias    = -1;
-    bool    sonido      = true;
-    bool    hayUpdate   = false;
-    char    fwVersion[16]   = {0};
-    char    versionNueva[16]= {0};
-    char    expresion[16]   = {0};   // nombre de la expresión/estado actual
-};
-
-// Acción disparada desde el panel web; main.cpp la consume con takeWebAction()
-// y la ejecuta en su loop (nunca dentro del handler HTTP, que no debe bloquear).
-enum class WebAction : uint8_t {
-    NINGUNA,
-    TOGGLE_SONIDO,
-    RENACER,
-    OTA_CHECK,
-    OTA_INSTALL,
-    ABRIR_PORTAL
-};
+// El dashboard web de la mascota (WebData / WebAction) se retiró con el pivot
+// a arcade: mostraba felicidad, energía y personalidad, que ya no existen.
+// Sobre la LAN queda vivo el servidor solo para /update (flasheo por
+// navegador) y el portal cautivo para configurar el WiFi.
 
 class Net {
 public:
@@ -78,18 +55,11 @@ public:
     bool hasCredentials() const { return _ssid.length() > 0; }
     const char* ssidGuardado() const { return _ssid.c_str(); }
 
-    // ----- Panel web en la LAN --------------------------------------
-    // main.cpp refresca el snapshot cada frame (barato: copia por valor).
-    void setWebData(const WebData& d) { _web = d; }
-    // main.cpp consume la acción pendiente cada frame y la ejecuta.
-    WebAction takeWebAction() {
-        WebAction a = _accionWeb;
-        _accionWeb = WebAction::NINGUNA;
-        return a;
-    }
-    // true si el server está atendiendo sobre la STA (dashboard accesible).
+    // ----- Servidor en la LAN (solo /update) ------------------------
+    // true si el server está atendiendo sobre la STA.
     bool lanServerActivo() const { return _lanServer; }
-    // IP del toy en la LAN ("" si no conectado) para mostrarla en el OLED.
+    // IP del toy en la LAN ("" si no conectado), para mostrarla en el OLED
+    // y poder entrar a http://<ip>/update desde el navegador.
     String lanIP() const;
 
 private:
@@ -143,11 +113,9 @@ private:
     bool     _cierrePendiente     = false; // cierre diferido programado desde un handler
     uint32_t _tCierrePortal       = 0;     // millis() a partir del cual cerrar
 
-    // ----- Panel web en la LAN ------------------------------------
-    bool      _lanServer    = false;              // server atendiendo sobre la STA
-    bool      _mdnsIniciado = false;              // mDNS ya arrancado (ramoncito.local)
-    WebData   _web{};                             // snapshot que refresca main.cpp
-    WebAction _accionWeb    = WebAction::NINGUNA; // acción pendiente para main.cpp
+    // ----- Servidor en la LAN -------------------------------------
+    bool      _lanServer    = false;   // server atendiendo sobre la STA
+    bool      _mdnsIniciado = false;   // mDNS ya arrancado (ramoncito.local)
 
     String _scanCache;   // resultado del último scan de redes, ya como <li>...
 
@@ -174,14 +142,6 @@ private:
     void _handleOtaGet();     // GET  /update — formulario de subida
     void _handleOtaPost();    // POST /update — respuesta con resultado + restart
     void _handleOtaUpload();  // callback de upload del WebServer
-
-    // Handlers del panel web en la LAN
-    bool _panelAutorizado();  // Basic Auth (OTA_USUARIO/OTA_CLAVE); false ⇒ ya pidió login
-    void _handlePanel();      // GET  /panel — dashboard HTML
-    void _handleApiState();   // GET  /api/state — snapshot en JSON
-    void _handleApiAction();  // GET  /api/action?do=... — encola una WebAction
-    void _handleApiNotify();  // GET/POST /api/notify — encola una notificación en pantalla
-    String _htmlPanel();      // HTML del dashboard (auto-refresca vía /api/state)
 
     // Genera el HTML del portal (strings en RAM; se descarta tras enviar)
     String _htmlPortal();

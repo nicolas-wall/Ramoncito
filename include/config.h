@@ -8,7 +8,7 @@
 
 // ----- Versión ----------------------------------------------
 // Semver puro: el parser de OTA compara major.minor.patch sin sufijos
-#define FW_VERSION "0.10.0"
+#define FW_VERSION "0.11.0"
 
 // ----- Pines (XIAO ESP32-S3: Dx -> GPIO real) ---------------
 // Pinout ARCADE. Los dos sensores táctiles capacitivos de la etapa
@@ -16,7 +16,7 @@
 //
 // Los ejes analógicos deben ir sí o sí a pines del ADC1 (GPIO1..GPIO10):
 // el ADC2 queda inutilizable con el WiFi encendido, y acá el WiFi está
-// siempre activo (OTA + panel LAN + Telegram).
+// siempre activo para el auto-OTA.
 static const uint8_t PIN_LED    = 21;  // LED integrado, activo en BAJO
 static const uint8_t PIN_BTN_A  = 1;   // D0  — botón 1 (a GND, pull-up interno) [CABLEADO]
 static const uint8_t PIN_BTN_C  = 3;   // D2  — botón 2 / activar (a GND, pull-up) [CABLEADO]
@@ -46,10 +46,6 @@ static const uint32_t I2C_CLOCK_HZ = 400000;
 // ----- Timing global -----------------------------------------
 static const uint32_t FRAME_MS         = 33;    // ~30 fps
 static const uint32_t INTERVALO_LOG_MS = 1000;  // log de estado por serial
-
-// Escala de tiempo para pruebas: 1 = producción. Con 60, un
-// "minuto" de decaimiento pasa en 1 segundo real.
-static const uint32_t TIME_SCALE = 1;
 
 // ----- Botones ------------------------------------------------
 static const uint32_t DEBOUNCE_MS = 30;
@@ -123,20 +119,6 @@ static const uint32_t PONG_SAQUE_MS      = 900;  // pausa antes de cada saque
 // ----- Reacciones (duraciones en ms) --------------------------
 static const uint32_t REACCION_BTN_MS    = 1500;
 static const uint32_t REACCION_TOUCH_MS  = 2000;
-static const uint32_t REACCION_TICKLE_MS = 1200;
-
-// ----- Cosquillas (pie) ---------------------------------------
-// Después de TICKLE_SEGUIDAS_MAX cosquillas dentro de TICKLE_VENTANA_MS → enojo
-static const uint8_t  TICKLE_SEGUIDAS_MAX = 3;
-static const uint32_t TICKLE_VENTANA_MS   = 6000;
-// Cooldown de malhumor tras enojarse por cosquillas de más (§1.2)
-static const uint32_t MALHUMOR_MS         = 60000;  // 60 s base (×2 gruñón, ÷2 alegre — Etapa B)
-
-// ----- Ronquido al dormir -------------------------------------
-// El ronquido suena periódicamente solo durante los primeros
-// RONQUIDO_VENTANA_MS tras quedarse dormido; después, silencio
-// (no se repite para siempre).
-static const uint32_t RONQUIDO_VENTANA_MS = 10000;  // 10 s de ronquidos al inicio del sueño
 
 // ----- Expresiones aleatorias durante idle --------------------
 static const uint32_t GUINO_RAND_MIN_MS    = 15000;   //  15 s entre guiños
@@ -146,17 +128,11 @@ static const uint32_t SOSP_RAND_MAX_MS     = 360000;  //   6 min
 static const uint32_t RAND_EXPR_DUR_MS     = 1500;    // duración normal
 static const uint32_t QUEHACER_EXPR_DUR_MS = 4000;    // duración en modo "qué hacemos"
 
-// ----- Interacciones nocturnas (§1.3) --------------------------
-static const uint32_t CARICIA_NOCHE_VENTANA_MS  = 30000;  // 30 s: ventana para la 2.ª caricia
-static const uint32_t REACCION_NOCHE_FELIZ_MS   = 2000;   // duración cara FELIZ nocturna
-static const uint32_t REACCION_NOCHE_ENOJO_MS   = 2500;   // duración cara ENOJADO nocturna
-
 // ----- Inactividad y standby (pantalla apagada) ---------------
 // Cada 10 min sin interacción → cara SOSPECHOSO ("¿qué pasa?"). Con el
 // standby a los 30 min, aparece a los 10 y 20 min antes del apagado.
 static const uint32_t INACTIVIDAD_QUEHACER_MS = 10UL * 60UL * 1000UL;
 static const uint32_t INACTIVIDAD_STANDBY_MS  = 30UL * 60UL * 1000UL; // 30 min despierto → pantalla off
-static const uint32_t DORMIDO_STANDBY_MS      = 15UL * 60UL * 1000UL; // 15 min durmiendo → off
 
 // ----- Animaciones idle (motor de ojos, doc 03) ---------------
 static const uint32_t PARPADEO_MIN_MS = 2000;
@@ -258,15 +234,7 @@ static const bool     SONIDO_HABILITADO_DEFAULT = true; // sin buzzer no molesta
 // 20% ≈ duty=51 → audible pero no agresivo. Rango recomendado: 10-35.
 static const uint8_t  SOUND_VOLUMEN_PCT = 10;    // porcentaje de duty máximo (0-100)
 
-// ----- Menú — long-press del botón en página 3 -----------------
-// Tiempo mínimo mantenido para disparar la acción de long-press (toggle sonido).
-static const uint32_t MENU_LONGPRESS_MS = 800;   // ms presionado para reconocer long-press
-
-// Timeout de confirmación del renacer (página 2): si no llega el
-// segundo toque (pie) dentro de este tiempo, se cancela la operación.
-static const uint32_t MENU_RENACER_CONFIRM_MS = 6000;  // 6 s para confirmar
-
-// ----- Animación de nacimiento — encendido CRT -----------------
+// ----- Animación de encendido CRT ------------------------------
 // Duración total ~2.1 s dividida en 4 fases:
 //
 //   FASE 0 — punto→línea (~260 ms):
@@ -302,24 +270,6 @@ static const uint32_t ANIM_NACIMIENTO_TOTAL_MS =
 static const uint16_t ANIM_NACIMIENTO_RUIDO_PX  = 200;  // píxeles blancos por frame
 // Altura mínima de la línea inicial en la fase 1 (hereda de la fase 0)
 static const uint8_t  ANIM_NACIMIENTO_LINEA_GROSOR = 2;  // px de grosor de la línea CRT
-
-// ----- Cerebro Tamagotchi (mood, doc 02/03) --------------------
-// Decaimiento POR TICK de 5 minutos (escalado por TIME_SCALE).
-// (El tick de 1 min original agotaba la energía en <1 h — demasiado
-// agresivo para un juguete de escritorio; verificado en uso real.)
-static const uint8_t  MOOD_DECAY_ENERGIA_PM   = 1;  // energía -1/tick (≈ -12/hora; con 2 el ciclo siesta era demasiado frecuente)
-static const uint8_t  MOOD_DECAY_FELICIDAD_PM = 3;  // felicidad -3/tick (≈ -36/hora; ~50 min de neutral a triste)
-static const uint8_t  MOOD_SUBE_ABURRIM_PM    = 5;  // aburrimiento +5/tick (≈ +60/hora; ~75 min de 0 a aburrido)
-static const uint8_t  MOOD_RECUPERA_ENERGIA_PT = 25; // energía +25/tick mientras duerme — recarga rápida para no ciclar
-static const uint32_t MOOD_TICK_MS            = 5UL * 60UL * 1000UL; // 5 min (dividido por TIME_SCALE)
-// Valores iniciales si no hay nada guardado:
-static const uint8_t  MOOD_INI_FELICIDAD = 50;
-static const uint8_t  MOOD_INI_ENERGIA   = 80;
-static const uint8_t  MOOD_INI_ABURRIM   = 0;
-// Persistencia NVS:
-static const uint32_t MOOD_GUARDAR_CADA_MS = 5UL * 60UL * 1000UL; // máx. cada 5 min
-// Decaimiento offline: tope de tiempo apagado que se aplica
-static const uint32_t OFFLINE_DECAY_TOPE_S = 48UL * 3600UL;       // 48 h
 
 // ----- Ciclo día/noche -----------------------------------------
 static const int  HORA_DORMIR    = 22;  // desde las 22:00...
@@ -373,22 +323,6 @@ static const uint32_t OTA_CHECK_INTERVALO_MS = 24UL * 3600UL * 1000UL; // despu�
 static const bool     PANEL_LAN_HABILITADO = true;
 static const char*    PANEL_MDNS_HOST      = "ramoncito";   // → http://ramoncito.local
 
-// ----- Notificaciones en pantalla -------------------------------------
-// Ramoncito puede mostrar avisos (ícono + título + texto que scrollea),
-// sonar y encenderse desde standby. Las fuentes son Telegram (mensajes
-// entrantes) y el webhook POST /api/notify (cualquier app en la LAN).
-static const bool     NOTIFY_HABILITADO = true;
-static const uint32_t NOTIF_AUTO_MS     = 12000;  // auto-cierre del aviso en pantalla
-
-// ----- Telegram (mensajes de ida y vuelta) ----------------------------
-// Requiere TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID en secrets.h. Con token
-// vacío queda desactivado solo. Ramoncito te escribe (poca energía, update
-// disponible, saludo) y vos le mandás texto/comandos (/estado, /feliz,
-// /sonido, /callar, /help). Solo obedece a TELEGRAM_CHAT_ID (whitelist).
-static const bool     TELEGRAM_HABILITADO = true;
-static const uint32_t TELEGRAM_POLL_MS    = 5000;   // cada cuánto revisa mensajes entrantes
-static const uint32_t TELEGRAM_MIN_ENVIO_MS = 3000; // anti-spam entre envíos salientes
-
 // ==== IMU (MPU6050 en GY-521) ====
 // Dirección I2C: AD0 a 3V3 → 0x69 (0x68 lo ocupa el RTC DS3231)
 static const uint8_t  IMU_ADDR = 0x69;
@@ -436,40 +370,3 @@ static const uint32_t IMU_LEVANTADO_SOSTEN_MS  = 400;    // ms sostenido para co
 
 // Debounce del evento "levantado": evita disparos repetidos si lo sostienen.
 static const uint32_t IMU_LEVANTADO_DEBOUNCE_MS = 3000;  // ms entre detecciones
-
-// ----- Personalidad (doc 06 §3) --------------------------------
-// Valores iniciales y umbrales de rasgo
-static const uint8_t  PERSONALIDAD_INI            = 50;
-static const uint8_t  PERSONALIDAD_UMBRAL_ALTO    = 65;   // rasgo > 65 → efecto "alto"
-static const uint8_t  PERSONALIDAD_UMBRAL_BAJO    = 35;   // rasgo < 35 → texto "bajo" (Etapa C)
-
-// Plasticidad: primeros N días el factor es ×1.0; después ×FACTOR_MADURO
-static const uint8_t  PERSONALIDAD_DIAS_FORMACION = 7;
-static const float    PERSONALIDAD_FACTOR_MADURO  = 0.25f;
-
-// Guardado diferido en NVS
-static const uint32_t PERSONALIDAD_GUARDAR_CADA_MS = 5UL * 60UL * 1000UL;
-
-// Límite de cosquillas cuando el gruñón es alto (en vez de TICKLE_SEGUIDAS_MAX)
-static const uint8_t  TICKLE_SEGUIDAS_GRUNON      = 2;
-
-// Decay de felicidad si alegre alto: 1/tick (en vez de MOOD_DECAY_FELICIDAD_PM)
-static const uint8_t  PERSONALIDAD_DECAY_FELIZ_ALEGRE = 1;
-
-// Recuperación de energía: delta base ±10 si energetico/perezoso alto
-static const uint8_t  PERSONALIDAD_RECUPERA_DELTA     = 10;
-
-// Umbrales de siesta según perezoso
-static const uint8_t  PERSONALIDAD_UMBRAL_SIESTA_BASE    = 5;
-static const uint8_t  PERSONALIDAD_UMBRAL_SIESTA_PEREZOSO = 10;
-
-// Umbrales de dominantExpression modulados por personalidad (no números mágicos)
-// Cara ENOJADO: felicidad < ENOJO_FEL y aburrimiento > ENOJO_ABUR (base; gruñón alto más fácil)
-static const uint8_t  PERSONALIDAD_ENOJO_FEL_GRUNON  = 25;  // gruñón alto: fel < 25
-static const uint8_t  PERSONALIDAD_ENOJO_ABUR_GRUNON = 50;  // gruñón alto: abur > 50
-static const uint8_t  PERSONALIDAD_ENOJO_FEL_BASE    = 20;  // base normal: fel < 20
-static const uint8_t  PERSONALIDAD_ENOJO_ABUR_BASE   = 60;  // base normal: abur > 60
-// Cara FELIZ: felicidad > FELIZ_FEL y aburrimiento < FELIZ_ABUR (alegre alto más fácil)
-static const uint8_t  PERSONALIDAD_FELIZ_FEL_ALEGRE  = 85;  // feliz solo con fel > 85
-static const uint8_t  PERSONALIDAD_FELIZ_ABUR_BASE   = 40;  // compartido: abur < 40
-static const uint8_t  PERSONALIDAD_FELIZ_FEL_BASE    = 85;  // feliz solo con fel > 85

@@ -44,15 +44,6 @@
 
 #include "net.h"
 #include "config.h"
-#include "notify.h"
-
-// Clave opcional del webhook desde secrets.h (si existe).
-#if __has_include("secrets.h")
-  #include "secrets.h"
-#endif
-#ifndef NOTIFY_TOKEN
-  #define NOTIFY_TOKEN ""
-#endif
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -590,16 +581,10 @@ void Net::_registrarRutas() {
         );
     }
 
-    // Panel web en la LAN (dashboard + API de estado y acciones)
-    if (PANEL_LAN_HABILITADO) {
-        _server->on("/panel",       [this]() { _handlePanel(); });
-        _server->on("/api/state",   [this]() { _handleApiState(); });
-        _server->on("/api/action",  [this]() { _handleApiAction(); });
-    }
-    // Webhook de notificaciones: cualquier app de la LAN empuja un aviso.
-    if (NOTIFY_HABILITADO) {
-        _server->on("/api/notify",  [this]() { _handleApiNotify(); });
-    }
+    // El dashboard de la mascota (/panel, /api/state, /api/action) y el
+    // webhook de avisos (/api/notify) se retiraron con el pivot a arcade:
+    // mostraban stats de humor que ya no existen. Lo que queda vivo sobre la
+    // LAN es solo /update, para poder flashear desde el navegador.
 
     // Sondas de portal cautivo de Android, iOS, Windows
     _server->on("/generate_204",             [this]() { _handleCaptiveRedirect(); });
@@ -877,12 +862,8 @@ function rescan() {
 // ================================================================
 
 void Net::_handleRoot() {
-    // En la LAN (portal cerrado, server sobre la STA) la raíz muestra el panel;
-    // así se entra directo a http://ramoncito.local sin recordar /panel.
-    if (!_portalActivo && _lanServer) {
-        _handlePanel();
-        return;
-    }
+    // La raíz es siempre el formulario de WiFi. Antes, con el portal cerrado,
+    // mostraba el dashboard de la mascota; ese panel ya no existe.
 
     // Pedido explícito del usuario (abrió la página): si no hay caché de
     // redes, intentar un scan. _lanzarScan() ya garantiza no molestar si
@@ -1131,256 +1112,5 @@ void Net::_handleOtaUpload() {
 String Net::lanIP() const {
     if (WiFi.status() == WL_CONNECTED) return WiFi.localIP().toString();
     return String();
-}
-
-// ================================================================
-//  Panel web en la LAN
-// ================================================================
-
-// Basic Auth con OTA_USUARIO/OTA_CLAVE. Devuelve false (y ya pidió login)
-// si no está autorizado: el handler debe retornar de inmediato.
-bool Net::_panelAutorizado() {
-    if (!_server->authenticate(OTA_USUARIO, OTA_CLAVE)) {
-        _server->requestAuthentication();
-        return false;
-    }
-    return true;
-}
-
-// GET /panel — dashboard HTML (los datos los trae luego /api/state por fetch)
-void Net::_handlePanel() {
-    if (!_panelAutorizado()) return;
-    _server->send(200, "text/html; charset=utf-8", _htmlPanel());
-}
-
-// GET /api/state — snapshot del estado en JSON (lo refresca main.cpp)
-void Net::_handleApiState() {
-    if (!_panelAutorizado()) return;
-    char buf[512];
-    snprintf(buf, sizeof(buf),
-        "{\"felicidad\":%u,\"energia\":%u,\"aburrimiento\":%u,"
-        "\"animo\":%u,\"energiaPers\":%u,\"edadDias\":%d,"
-        "\"sonido\":%s,\"hayUpdate\":%s,\"fw\":\"%s\",\"verNueva\":\"%s\","
-        "\"expr\":\"%s\",\"ssid\":\"%s\",\"ip\":\"%s\"}",
-        _web.felicidad, _web.energia, _web.aburrimiento,
-        _web.animo, _web.energia_pers, _web.edadDias,
-        _web.sonido ? "true" : "false",
-        _web.hayUpdate ? "true" : "false",
-        _web.fwVersion, _web.versionNueva, _web.expresion,
-        _ssid.c_str(), WiFi.localIP().toString().c_str());
-    _server->send(200, "application/json; charset=utf-8", buf);
-}
-
-// GET /api/action?do=... — encola una acción; main.cpp la ejecuta en su loop.
-// Nunca ejecuta aquí (el handler no debe bloquear ni reiniciar en medio).
-void Net::_handleApiAction() {
-    if (!_panelAutorizado()) return;
-    String d = _server->arg("do");
-    const char* msg = "ok";
-    int code = 200;
-
-    if (d == "sonido") {
-        _accionWeb = WebAction::TOGGLE_SONIDO; msg = "sonido cambiado";
-    } else if (d == "ota_check") {
-        _accionWeb = WebAction::OTA_CHECK;     msg = "chequeando actualizacion...";
-    } else if (d == "ota_install") {
-        if (!_web.hayUpdate) { code = 409; msg = "no hay actualizacion disponible"; }
-        else { _accionWeb = WebAction::OTA_INSTALL; msg = "instalando... el toy se reinicia"; }
-    } else if (d == "portal") {
-        _accionWeb = WebAction::ABRIR_PORTAL;  msg = "abri la red Ramoncito-setup en el toy";
-    } else if (d == "renacer") {
-        if (_server->arg("confirm") != "1") { code = 400; msg = "falta confirmacion"; }
-        else { _accionWeb = WebAction::RENACER; msg = "renaciendo... borra todo"; }
-    } else {
-        code = 400; msg = "accion desconocida";
-    }
-
-    char buf[160];
-    snprintf(buf, sizeof(buf), "{\"ok\":%s,\"msg\":\"%s\"}",
-             code == 200 ? "true" : "false", msg);
-    _server->send(code, "application/json; charset=utf-8", buf);
-}
-
-// GET/POST /api/notify — empuja una notificación a la pantalla del toy.
-// Params: titulo|title, texto|text, icono|icon (chat|mail|bell|alerta|reloj),
-//         token (opcional). Auth: Basic Auth del panel, O ?token=NOTIFY_TOKEN
-//         si NOTIFY_TOKEN está configurado (más cómodo para Home Assistant/IFTTT).
-//   Ej: curl "http://ramoncito.local/api/notify?title=Mail&text=Tenes+2+nuevos&icon=mail" -u ramoncito:ramoncito
-void Net::_handleApiNotify() {
-    // Autorización: token del webhook o, si no, Basic Auth.
-    bool tokOk = (strlen(NOTIFY_TOKEN) > 0 && _server->arg("token") == NOTIFY_TOKEN);
-    if (!tokOk && !_panelAutorizado()) return;   // _panelAutorizado() ya pidió login
-
-    String titulo = _server->arg("titulo"); if (!titulo.length()) titulo = _server->arg("title");
-    String texto  = _server->arg("texto");  if (!texto.length())  texto  = _server->arg("text");
-    String icono  = _server->arg("icono");  if (!icono.length())  icono  = _server->arg("icon");
-
-    if (!texto.length() && !titulo.length()) {
-        _server->send(400, "application/json; charset=utf-8",
-                      "{\"ok\":false,\"msg\":\"falta title/text\"}");
-        return;
-    }
-    if (!titulo.length()) titulo = "Aviso";
-
-    notify.push(titulo.c_str(), texto.c_str(), Notify::iconoDeTexto(icono.c_str()));
-    Serial.printf("[web] notify: %s\n", titulo.c_str());
-    _server->send(200, "application/json; charset=utf-8", "{\"ok\":true}");
-}
-
-// HTML del dashboard: estilo "character creator" dibujado a mano (cutekart).
-String Net::_htmlPanel() {
-    return String(R"rawhtml(<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#e9dcc0">
-<title>Ramoncito</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-  :root{--paper:#f5ecd6;--paper2:#efe3c6;--ink:#2b2620;--blue:#7d97c4;--orange:#e2a24c;--red:#cf5a41}
-  body{min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:22px 14px 44px;
-    font-family:"Comic Sans MS","Comic Sans","Chalkboard SE","Marker Felt","Segoe Print",cursive;color:var(--ink);
-    background:#cfc7b6;background-image:radial-gradient(circle at 28% 18%,#dad3c3,transparent 60%),
-      radial-gradient(circle at 82% 72%,#c5bca9,transparent 55%)}
-  .win{width:100%;max-width:540px;background:var(--paper);
-    border:3px solid var(--ink);border-radius:14px 10px 16px 9px/9px 16px 10px 14px;
-    box-shadow:6px 8px 0 rgba(0,0,0,.18);overflow:hidden}
-  .tbar{display:flex;align-items:center;gap:8px;border-bottom:3px solid var(--ink);padding:7px 10px;background:var(--paper2)}
-  .url{flex:1;font-size:.72rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .wbtn{width:22px;height:20px;border:2.5px solid var(--ink);border-radius:6px 4px 6px 4px/4px 6px 4px 6px;
-    display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:800;background:var(--paper);cursor:pointer}
-  .body{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:14px}
-  .col{min-width:0}
-  .stat{margin-bottom:11px}
-  .slbl{font-size:.8rem;font-weight:800;letter-spacing:.02em;margin-bottom:4px;text-transform:uppercase}
-  .seg{display:flex;gap:3px;height:19px}
-  .seg i{flex:1;border:2.2px solid var(--ink);border-radius:5px 3px 5px 3px/3px 5px 3px 5px;background:var(--paper)}
-  .seg i.on{background:var(--blue)}
-  .seg.warn i.on{background:var(--orange)}
-  .selcap{font-size:.64rem;font-weight:800;opacity:.6;text-transform:uppercase;margin:9px 0 -2px 2px}
-  .sel{display:flex;align-items:center;gap:8px}
-  .arw{font-size:1rem;font-weight:900;opacity:.45}
-  .selbox{flex:1;text-align:center;border:2.5px solid var(--ink);
-    border-radius:16px 10px 18px 10px/10px 18px 10px 16px;padding:6px 8px;font-weight:800;
-    font-size:.86rem;text-transform:uppercase;background:var(--paper)}
-  .icons{display:flex;gap:9px;margin-top:14px}
-  .ico{width:46px;height:40px;border:2.8px solid var(--ink);border-radius:12px 8px 12px 8px/8px 12px 8px 12px;
-    background:var(--paper);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;position:relative;transition:transform .06s}
-  .ico:active{transform:translateY(2px)}
-  .ico.red{background:#f2c9bf}.ico.warn{background:#f3dcae}
-  .ico .bang{position:absolute;top:-7px;right:-6px;background:var(--red);color:#fff;font-size:.6rem;font-weight:900;
-    width:16px;height:16px;border-radius:50%;border:2px solid var(--ink);display:none;align-items:center;justify-content:center}
-  .frame{border:3px solid var(--ink);border-radius:16px 12px 18px 10px/10px 18px 12px 16px;
-    background:repeating-linear-gradient(0deg,#fbf5e4,#fbf5e4 22px,#f2e8ce 22px,#f2e8ce 24px);
-    min-height:230px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;position:relative}
-  .moodtag{position:absolute;top:8px;left:0;right:0;text-align:center;font-size:.8rem;font-weight:800;opacity:.75}
-  .ph{width:70%;max-width:150px;animation:bob 4.5s ease-in-out infinite}
-  @keyframes bob{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-8px) rotate(1deg)}}
-  .phtag{margin-top:8px;font-size:.72rem;font-weight:800;opacity:.6;border:2px dashed var(--ink);border-radius:20px;padding:3px 12px}
-  .namebar{display:flex;align-items:center;gap:8px;margin-top:12px}
-  .namebox{flex:1;border:2.8px solid var(--ink);border-radius:16px 10px 18px 10px/10px 18px 10px 16px;
-    padding:8px 12px;font-weight:900;font-size:1.05rem;letter-spacing:.03em;text-transform:uppercase;background:var(--paper)}
-  .reload{width:40px;height:40px;border:2.8px solid var(--ink);border-radius:50%;background:var(--paper);
-    cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px}
-  .sys{font-size:.66rem;font-weight:700;opacity:.6;margin-top:9px;text-align:center}
-  .upd{display:none;margin-top:10px;border:2.5px dashed var(--ink);background:#e7f0d8;border-radius:12px;padding:8px 10px;font-size:.76rem;font-weight:700}
-  .upd b{cursor:pointer;text-decoration:underline}
-  #toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(8px);background:var(--paper);color:var(--ink);
-    border:2.8px solid var(--ink);border-radius:12px 8px 14px 8px/8px 14px 8px 12px;padding:9px 16px;font-size:.82rem;font-weight:800;
-    box-shadow:4px 5px 0 rgba(0,0,0,.2);opacity:0;transition:all .25s;pointer-events:none}
-  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-  @media(max-width:560px){.body{grid-template-columns:1fr}}
-</style>
-</head>
-<body>
-<div class="win">
-  <div class="tbar">
-    <span class="url" id="url">WWW.RAMONCITO.LOCAL / CHARACTER</span>
-    <span class="wbtn">_</span><span class="wbtn">&#9633;</span><span class="wbtn" onclick="refresh()">&#10005;</span>
-  </div>
-  <div class="body">
-    <div class="col">
-      <div class="stat"><div class="slbl">Felicidad</div><div class="seg" id="s-fel"></div></div>
-      <div class="stat"><div class="slbl">Energia</div><div class="seg" id="s-ene"></div></div>
-      <div class="stat"><div class="slbl">Aburrimiento</div><div class="seg warn" id="s-abu"></div></div>
-      <div class="stat"><div class="slbl">Vitalidad</div><div class="seg" id="s-vit"></div></div>
-      <div class="selcap">Humor</div>
-      <div class="sel"><span class="arw">&#9664;</span><div class="selbox" id="sel-mood">--</div><span class="arw">&#9654;</span></div>
-      <div class="selcap">Caracter</div>
-      <div class="sel"><span class="arw">&#9664;</span><div class="selbox" id="sel-car">--</div><span class="arw">&#9654;</span></div>
-      <div class="icons">
-        <div class="ico" id="ico-snd" title="Sonido" onclick="act('sonido')">&#128266;</div>
-        <div class="ico" title="Cambiar WiFi" onclick="act('portal','Abrir el portal de WiFi en el toy?')">&#128246;</div>
-        <div class="ico warn" title="Buscar actualizacion" onclick="act('ota_check')">&#128260;<span class="bang" id="bang">!</span></div>
-        <div class="ico red" title="Renacer" onclick="act('renacer','RENACER borra TODO (personalidad, humor, edad). Seguro?')">&#128293;</div>
-      </div>
-    </div>
-    <div class="col">
-      <div class="frame">
-        <div class="moodtag" id="mood">&nbsp;</div>
-        <svg class="ph" viewBox="0 0 120 150">
-          <g fill="none" stroke="#2b2620" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-            <ellipse cx="42" cy="30" rx="9" ry="20" fill="#f5ecd6"/>
-            <ellipse cx="78" cy="30" rx="9" ry="20" fill="#f5ecd6"/>
-            <circle cx="60" cy="62" r="34" fill="#f5ecd6"/>
-            <circle cx="49" cy="58" r="4" fill="#2b2620"/>
-            <circle cx="71" cy="58" r="4" fill="#2b2620"/>
-            <path d="M57 70 L63 70 L60 75 Z" fill="#2b2620"/>
-            <path d="M40 96 Q60 138 80 96" fill="#f5ecd6"/>
-          </g>
-        </svg>
-        <div class="phtag">personaje proximamente</div>
-      </div>
-      <div class="namebar">
-        <div class="namebox" id="name">RAMONCITO</div>
-        <div class="reload" title="Actualizar" onclick="refresh()">&#8635;</div>
-      </div>
-      <div class="sys" id="sys">--</div>
-      <div class="upd" id="upd"></div>
-    </div>
-  </div>
-</div>
-<div id="toast"></div>
-<script>
-var MOODS={tranquilo:"Tranquilo",neutral:"Tranquilo",feliz:"Feliz",riendo:"Se rie",triste:"Triste",
-  enojado:"Enojado",sorprendido:"Sorprendido",aburrido:"Aburrido",dormido:"Durmiendo",
-  sospechoso:"Desconfiado",enamorado:"Enamorado",mareado:"Mareado",ilusionado:"Ilusionado"};
-var N=10;
-function seg(id,val){var el=document.getElementById(id);if(!el)return;
-  if(!el._b){for(var i=0;i<N;i++)el.appendChild(document.createElement('i'));el._b=1;}
-  var k=Math.round(Math.max(0,Math.min(100,val))/100*N),c=el.children;
-  for(var i=0;i<N;i++)c[i].className=(i<k?'on':'');}
-function carac(v){return v<35?'GRUNON':(v>65?'ALEGRE':'EQUILIBRADO');}
-function toast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');
-  clearTimeout(t._h);t._h=setTimeout(function(){t.classList.remove('show');},2600);}
-async function refresh(){
-  try{
-    var r=await fetch('/api/state');if(!r.ok)return;var s=await r.json();
-    var e=(s.expr||'tranquilo');
-    document.getElementById('mood').textContent=MOODS[e]||'Tranquilo';
-    document.getElementById('sel-mood').textContent=(MOODS[e]||'Tranquilo').toUpperCase();
-    document.getElementById('sel-car').textContent=carac(s.animo);
-    seg('s-fel',s.felicidad);seg('s-ene',s.energia);seg('s-abu',s.aburrimiento);seg('s-vit',s.energiaPers);
-    document.getElementById('url').textContent='WWW.RAMONCITO.LOCAL / '+(s.ip||'CHARACTER');
-    document.getElementById('sys').textContent='v'+s.fw+'  .  '+(s.edadDias<0?'0':s.edadDias)+' DIAS  .  '+(s.ssid||'-');
-    document.getElementById('ico-snd').innerHTML=(s.sonido?'🔊':'🔇');
-    var upd=document.getElementById('upd'),bang=document.getElementById('bang');
-    if(s.hayUpdate){upd.style.display='block';
-      upd.innerHTML='Nueva version v'+s.verNueva+' - <b onclick="act(\'ota_install\',\'Instalar la nueva version? El toy se reinicia.\')">INSTALAR</b>';
-      bang.style.display='flex';}
-    else{upd.style.display='none';bang.style.display='none';}
-  }catch(err){}
-}
-async function act(doName,confirmMsg){
-  if(confirmMsg&&!confirm(confirmMsg))return;
-  var q='/api/action?do='+doName+(doName==='renacer'?'&confirm=1':'');
-  try{var r=await fetch(q);var j=await r.json();toast(j.msg);}catch(e){toast('error de red');}
-  setTimeout(refresh,900);
-}
-setInterval(refresh,2000);refresh();
-</script>
-</body>
-</html>)rawhtml");
 }
 
