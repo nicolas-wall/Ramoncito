@@ -258,7 +258,10 @@ static const bool     FACE_BOCA_HABILITADA = true;
 // cara y no como dos ojos con algo colgando abajo.
 static const float    FACE_BOCA_CY         = 44.0f;
 // Grosor del trazo de los arcos, en píxeles (elipses apiladas).
-static const uint8_t  FACE_BOCA_GROSOR     = 3;
+// Fino a propósito: el estilo de referencia vive del contraste entre trazos
+// delgados —las bocas cerradas— y manchas sólidas grandes —las abiertas—.
+// Con arcos gruesos las dos mitades del repertorio pesan igual y se pierde.
+static const uint8_t  FACE_BOCA_GROSOR     = 2;
 // Cuánto acompaña la boca al offset de mirada. En 1.0 se mueve igual que
 // los ojos y la cara entera parece girar; en 0 queda clavada al centro.
 static const float    FACE_BOCA_SIGUE_MIRADA = 1.0f;

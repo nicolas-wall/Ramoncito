@@ -74,7 +74,8 @@ enum class BocaStyle : uint8_t {
     ARCO_ENOJADO,    // arco ∩ más ancho y abierto
     ARCO_SUAVE,      // arco ∪, sonrisa cerrada
     OVALO,           // óvalo relleno: sorpresa
-    ONDA             // "ω": dormido, mareado
+    ONDA,            // "ω": dos arcos ∪ pegados
+    SERPENTINA       // "~": línea ondulada horizontal
 };
 
 // Mismo orden que EXPR_TABLE.
@@ -90,7 +91,7 @@ static const BocaStyle BOCA_TABLE[13] = {
     BocaStyle::SONRISA,         // AMOR
     BocaStyle::ARCO_SUAVE,      // GUINO
     BocaStyle::SONRISA_GRANDE,  // RISA
-    BocaStyle::ONDA,            // MAREADO
+    BocaStyle::SERPENTINA,      // MAREADO
     BocaStyle::SONRISA          // ILUSIONADO
 };
 
@@ -1516,6 +1517,22 @@ void Face::drawBoca(U8G2 &u8)
             u8.drawEllipse(ax, ay, (uint8_t)(arx - i), (uint8_t)(ary - i), opt);
     };
 
+    // Serpentina horizontal "~", dibujada como polilínea sobre un seno.
+    // No sale de ninguna primitiva de u8g2: hay que ir punto por punto.
+    auto onda = [&](int16_t ox, int16_t oy, int16_t semi, float amp,
+                    float fase, uint8_t grosor) {
+        int16_t prevX = ox - semi;
+        int16_t prevY = oy + (int16_t)(amp * sinf(fase));
+        for (int16_t i = -semi + 2; i <= semi; i += 2) {
+            float  t = (float)i / (float)semi * 3.1416f * 1.5f;
+            int16_t x = ox + i;
+            int16_t y = oy + (int16_t)(amp * sinf(t + fase));
+            for (uint8_t g = 0; g < grosor; g++)
+                u8.drawLine(prevX, prevY + g, x, y + g);
+            prevX = x; prevY = y;
+        }
+    };
+
     u8.setDrawColor(1);
 
     switch (st) {
@@ -1525,7 +1542,7 @@ void Face::drawBoca(U8G2 &u8)
     case BocaStyle::LINEA:
     case BocaStyle::LINEA_LADEADA: {
         int16_t dx = (st == BocaStyle::LINEA_LADEADA ? 4 : 0);
-        arco(cx + dx, cy - 2, rx(9.0f), ry(3.0f + resp * 0.8f), FACE_BOCA_GROSOR,
+        arco(cx + dx, cy - 1, rx(11.0f), ry(2.5f + resp * 0.6f), FACE_BOCA_GROSOR,
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
@@ -1533,38 +1550,38 @@ void Face::drawBoca(U8G2 &u8)
     // Media elipse rellena con el lado plano arriba: la boca abierta
     // sonriente del estilo de referencia. Ancha y honda para que se lea.
     case BocaStyle::SONRISA:
-        u8.drawFilledEllipse(cx, cy - 2, rx(11.0f), ry(7.0f + resp * 1.2f),
+        u8.drawFilledEllipse(cx, cy - 2, rx(13.0f), ry(9.0f + resp * 1.2f),
                              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
 
     // La carcajada abre y cierra bastante más, y más rápido.
     case BocaStyle::SONRISA_GRANDE:
-        u8.drawFilledEllipse(cx, cy - 3, rx(13.0f), ry(9.0f + resp2 * 2.2f),
+        u8.drawFilledEllipse(cx, cy - 3, rx(15.0f), ry(11.0f + resp2 * 2.2f),
                              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
 
     // Arco hacia abajo (∩): boca triste.
     case BocaStyle::ARCO_TRISTE:
-        arco(cx, cy + 4, rx(10.0f), ry(6.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy + 3, rx(12.0f), ry(5.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
         break;
 
     // El enojo lleva su propio arco, más ancho y más abierto que el triste:
     // con la misma boca, enojado y triste solo se distinguían por los ojos.
     case BocaStyle::ARCO_ENOJADO:
-        arco(cx, cy + 5, rx(14.0f), ry(8.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy + 4, rx(15.0f), ry(7.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
         break;
 
     // Arco hacia arriba (∪): sonrisa cerrada, más discreta que la rellena.
     case BocaStyle::ARCO_SUAVE:
-        arco(cx, cy - 3, rx(11.0f), ry(6.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy - 2, rx(13.0f), ry(5.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
 
     // Óvalo que se estira en vertical: el "oh" de la sorpresa.
     case BocaStyle::OVALO:
-        u8.drawFilledEllipse(cx, cy, rx(5.0f), ry(6.0f + resp * 1.2f), U8G2_DRAW_ALL);
+        u8.drawFilledEllipse(cx, cy, rx(6.0f), ry(7.0f + resp * 1.2f), U8G2_DRAW_ALL);
         break;
 
     // Dos arcos ∪ pegados = "ω". Se balancean en contrafase, uno sube
@@ -1578,6 +1595,13 @@ void Face::drawBoca(U8G2 &u8)
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
+
+    // "~": la boca ondulada. Ondea de verdad, corriendo la fase con el
+    // tiempo, en vez de ser una curva fija que solo sube y baja.
+    case BocaStyle::SERPENTINA:
+        onda(cx, cy, (int16_t)(11.0f * esc), 2.6f * escY,
+             _bocaFase * 2.0f, 2);
+        break;
 
     case BocaStyle::NINGUNA:
     default:
