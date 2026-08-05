@@ -24,6 +24,7 @@
 //    i         imprime estado
 //    u         fuerza chequeo de auto-OTA inmediatamente
 //    n         alterna el menú
+//    e         pasa a la siguiente expresión (para revisar las caras)
 //    o         fuerza el standby (para probar cómo despierta)
 //    g         vigilancia del acelerómetro on/off
 //    k         escáner de pines (foto de todos los pines libres)
@@ -385,6 +386,19 @@ static void procesarComando(const char* cmd) {
         } else {
             Serial.println("[watch] OFF");
         }
+    } else if (cmd[0] == 'e') {
+        // Pasa por todas las expresiones, una por vez. Sin esto habría que
+        // esperar a que salgan solas —algunas cada varios minutos— para ver
+        // cómo quedó cada boca.
+        static const char* NOMBRES[] = {
+            "NEUTRAL", "FELIZ", "TRISTE", "ENOJADO", "SORPRENDIDO",
+            "ABURRIDO", "DORMIDO", "SOSPECHOSO", "AMOR", "GUINO",
+            "RISA", "MAREADO", "ILUSIONADO"
+        };
+        static uint8_t demo = 0;
+        demo = (uint8_t)((demo + 1) % 13);
+        Serial.printf("[cara] %u/13 %s\n", demo + 1, NOMBRES[demo]);
+        reaccionar((Expression)demo, 20000, NOMBRES[demo], millis());
     } else if (cmd[0] == 'o') {
         // Fuerza el standby. Sin esto habría que esperar los 10 minutos de
         // inactividad para probar cómo despierta.

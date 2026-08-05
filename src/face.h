@@ -111,6 +111,7 @@ private:
     // helpers internos
     static void lerpEye(EyeParams &cur, const EyeParams &tgt, float t);
     void drawEye(U8G2 &u8, const EyeParams &p);
+    void drawBoca(U8G2 &u8);
     void scheduleNextBlink(uint32_t now);
     void scheduleNextGaze(uint32_t now);
     void scheduleNextBostezo(uint32_t now);

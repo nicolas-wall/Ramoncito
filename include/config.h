@@ -238,6 +238,17 @@ static const uint32_t QUEHACER_EXPR_DUR_MS = 4000;    // duración en modo "qué
 static const uint32_t INACTIVIDAD_QUEHACER_MS = 3UL  * 60UL * 1000UL;
 static const uint32_t INACTIVIDAD_STANDBY_MS  = 10UL * 60UL * 1000UL; // 10 min despierto → pantalla off
 
+// ----- Boca ---------------------------------------------------
+// La cara arrancó siendo solo ojos. La boca se agregó después, en estilo
+// kawaii (pocas líneas, mucho contraste), y este flag permite compararla
+// contra la versión sin boca sin tener que revertir nada.
+static const bool     FACE_BOCA_HABILITADA = true;
+// Centro vertical de la boca. Los ojos ocupan hasta y=46 (cy=35, alto 22),
+// así que 53 la deja despegada sin irse al borde inferior.
+static const float    FACE_BOCA_CY         = 53.0f;
+// Ancho de las bocas de barra (neutro y escéptico).
+static const float    FACE_BOCA_ANCHO      = 12.0f;
+
 // ----- Animaciones idle (motor de ojos, doc 03) ---------------
 static const uint32_t PARPADEO_MIN_MS = 2000;
 static const uint32_t PARPADEO_MAX_MS = 6000;
