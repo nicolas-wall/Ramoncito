@@ -31,9 +31,9 @@ Los dos tact switch que ya había alcanzan para jugar: la palanca es lo único q
                    ┌─────────────┐
               GND ─┤ GND     3V3 ├─ VCC (OLED + palanca)
                    │             │
-      Botón A ──── ┤ D0 (GPIO1)  │
+      Botón A ──── ┤ D0 (GPIO1)  │  ← ya cableado
    Palanca VRx ─── ┤ D1 (GPIO2)  │  (ADC1_CH1)
-      Botón C ──── ┤ D2 (GPIO3)  │
+      Botón C ──── ┤ D2 (GPIO3)  │  ← ya cableado
                    │             │
    Buzzer (+) ──── ┤ D3 (GPIO4) ─┤── [~100Ω] ──► Buzzer ──► GND
                    │             │
@@ -74,9 +74,9 @@ Palanca KY-023 (5 pines):
 
 | Componente | Pin XIAO | GPIO real | Nota |
 |---|---|---|---|
-| Botón A | D0 | GPIO1 | a GND, `INPUT_PULLUP` interno, sin resistencia externa |
+| Botón A | D0 | GPIO1 | a GND, `INPUT_PULLUP` interno, sin resistencia externa. **Ya cableado** |
 | Palanca eje X | D1 | GPIO2 | analógico, **ADC1**_CH1 |
-| Botón C / START | D2 | GPIO3 | a GND, `INPUT_PULLUP`. Pin de strapping: ver nota abajo |
+| Botón C / activar | D2 | GPIO3 | a GND, `INPUT_PULLUP`. **Ya cableado.** Pin de strapping: ver nota abajo |
 | Buzzer pasivo | D3 | GPIO4 | PWM LEDC, resistencia ~100 Ω en serie recomendada |
 | OLED SDA | D4 | GPIO5 | I2C por defecto del XIAO |
 | OLED SCL | D5 | GPIO6 | I2C por defecto del XIAO |
@@ -85,6 +85,8 @@ Palanca KY-023 (5 pines):
 | Botón B | D10 | GPIO9 | a GND, `INPUT_PULLUP` |
 
 **Por qué los ejes van sí o sí a ADC1:** el ESP32-S3 le presta el ADC2 al driver de WiFi. Con el WiFi levantado —que acá es siempre, por OTA, panel LAN y Telegram— las lecturas de ADC2 fallan o devuelven basura. ADC1 son los GPIO1 a GPIO10, y ahí están GPIO2 y GPIO8.
+
+**Los dos pulsadores que ya estaban montados van a GPIO1 y GPIO3**, verificado con el escáner de pines (comando serial `k`, ver §4.5). El segundo quedó mapeado como botón C (activar) y no como B porque con solo dos botones "avanzar de página + activar la opción" es una combinación usable, mientras que "avanzar de página + mover cursor" no dejaría confirmar nada.
 
 **Por qué GPIO3 lleva un botón y no un eje:** GPIO3 es pin de strapping del ESP32-S3 (selección de JTAG). Con los eFuses de fábrica se ignora al bootear, así que es utilizable; pero un botón con pull-up queda en HIGH durante el arranque, que es un nivel lógico definido, mientras que un eje analógico en reposo queda a media tensión. Entre los dos, el botón es la opción segura.
 
@@ -197,6 +199,21 @@ GPIO4 (D3) ──[100 Ω]──► (+) Buzzer (−) ──► GND
 La resistencia de 100 Ω en serie limita la corriente y protege el pin. El buzzer típico de kit Arduino a 3.3 V no necesita transistor de potencia.
 
 **Firmware:** se usa el módulo LEDC del ESP32-S3 para generar PWM a la frecuencia de la nota deseada (frecuencia varía; duty cycle fijo al 50%).
+
+---
+
+### 4.5 Escáner de pines — comando serial `k`
+
+Para no tener que seguir un cable a ojo en la protoboard, el firmware trae un escáner. El comando `k` pone en `INPUT_PULLUP` todos los pines libres del XIAO e imprime el nivel de cada uno:
+
+```
+[scan] D0/g1:1 D1/g2:1 D2/g3:0 D8/g7:1 D9/g8:1 D10/g9:1 D6/g43:1 D7/g44:1
+                          ↑ hay un botón acá, apretado
+```
+
+**Cómo usarlo:** mantener el botón apretado varios segundos y mandar `k` repetidamente. El pin que aparezca en `0` mientras se sostiene es donde está cableado. Un pin en `1` permanente está suelto o no tiene el otro terminal a GND.
+
+Si la palanca está montada (`JOYSTICK_PRESENTE = true`), el escáner saltea sus dos ejes: ponerles un pull-up falsearía la lectura del ADC.
 
 ---
 

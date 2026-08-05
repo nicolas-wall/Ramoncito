@@ -493,8 +493,7 @@ static void despacharEventos(uint32_t ahora) {
         // ── IDLE / REACTING ──────────────────────────────────────
         // El botón A abre el menú. El resto de los controles todavía no
         // tiene destino: van a ser la entrada al arcade (menú de juegos),
-        // que es el próximo paso. Por ahora solo cuentan como actividad,
-        // así el toy no se va a standby mientras lo estás usando.
+        // que es el próximo paso.
         if (ev == InputEvent::BTN_A_PRESS) {
             marcarActividad(ahora);
             randExprActiva  = false;
@@ -504,7 +503,11 @@ static void despacharEventos(uint32_t ahora) {
             menuHasta  = ahora + MENU_TIMEOUT_MS;
             sound.play(Melody::BIP);
         } else {
+            // Sin función asignada todavía, pero contestan igual: un bip
+            // deja claro que el botón llega al firmware. Sin esto, un botón
+            // recién cableado y uno roto se ven exactamente igual.
             marcarActividad(ahora);
+            sound.play(Melody::BIP);
         }
     }
 }
@@ -573,6 +576,24 @@ static void procesarComando(const char* cmd) {
         // Forzar chequeo de auto-OTA inmediatamente
         ota.forzarChequeo();
         Serial.println("[cmd] chequeo OTA forzado");
+    } else if (cmd[0] == 'k') {
+        // Escaneo de pines: pone en INPUT_PULLUP todos los pines libres del
+        // XIAO e imprime el nivel de cada uno. Sirve para descubrir en qué
+        // GPIO está cableado un botón sin tener que seguir el cable a ojo:
+        // el que aparezca en 0 mientras lo mantenés apretado es ese.
+        // Se saltean los ejes de la palanca si está montada, para no pisar
+        // el ADC con un pull-up.
+        static const uint8_t cand[]   = {  1,    2,    3,    7,    8,    9,   43,   44 };
+        static const char*   etiq[]   = {"D0", "D1", "D2", "D8", "D9","D10", "D6", "D7"};
+        char linea[192];
+        int n = snprintf(linea, sizeof(linea), "[scan]");
+        for (uint8_t i = 0; i < sizeof(cand) && n > 0 && n < (int)sizeof(linea); i++) {
+            if (JOYSTICK_PRESENTE && (cand[i] == PIN_JOY_X || cand[i] == PIN_JOY_Y)) continue;
+            pinMode(cand[i], INPUT_PULLUP);
+            n += snprintf(linea + n, sizeof(linea) - n, " %s/g%u:%d",
+                          etiq[i], cand[i], digitalRead(cand[i]));
+        }
+        Serial.println(linea);
     } else if (cmd[0] == 'w' || cmd[0] == 'x' || cmd[0] == 'a' || cmd[0] == 'd') {
         // Stub de la palanca mientras no esté el módulo físico: cada tecla
         // es un golpe que vuelve solo al centro (ver Input::setStubAxis).

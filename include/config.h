@@ -18,12 +18,18 @@
 // el ADC2 queda inutilizable con el WiFi encendido, y acá el WiFi está
 // siempre activo (OTA + panel LAN + Telegram).
 static const uint8_t PIN_LED    = 21;  // LED integrado, activo en BAJO
-static const uint8_t PIN_BTN_A  = 1;   // D0  — botón 1 (a GND, pull-up interno)
-static const uint8_t PIN_BTN_B  = 9;   // D10 — botón 2 (a GND, pull-up interno)
-static const uint8_t PIN_BTN_C  = 3;   // D2  — botón 3 / START (a GND, pull-up interno)
+static const uint8_t PIN_BTN_A  = 1;   // D0  — botón 1 (a GND, pull-up interno) [CABLEADO]
+static const uint8_t PIN_BTN_C  = 3;   // D2  — botón 2 / activar (a GND, pull-up) [CABLEADO]
+static const uint8_t PIN_BTN_B  = 9;   // D10 — botón 3 (a GND, pull-up interno)
 static const uint8_t PIN_JOY_SW = 7;   // D8  — pulsador de la palanca (a GND, pull-up interno)
 static const uint8_t PIN_JOY_X  = 2;   // D1  — eje X analógico (ADC1_CH1)
 static const uint8_t PIN_JOY_Y  = 8;   // D9  — eje Y analógico (ADC1_CH7)
+//
+// Verificado con el escáner de pines (comando serial 'k') el 2026-08-04: los
+// dos pulsadores que ya estaban montados van a GPIO1 y GPIO3. Por eso el
+// segundo quedó como botón C (activar) y no como B: con solo dos botones,
+// "avanzar página + activar la opción" es una combinación usable, mientras
+// que "avanzar página + mover cursor" no permitiría confirmar nada.
 static const uint8_t PIN_BUZZER = 4;   // D3  — buzzer pasivo (PWM LEDC)
 // I2C del OLED: SDA=GPIO5 (D4), SCL=GPIO6 (D5) — defaults de Wire en el XIAO
 //

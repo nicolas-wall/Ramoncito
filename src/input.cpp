@@ -59,6 +59,9 @@ void Input::begin() {
     pinMode(PIN_BTN_C,  INPUT_PULLUP);
     pinMode(PIN_JOY_SW, INPUT_PULLUP);
 
+    Serial.printf("[input] botones en GPIO A:%u B:%u C:%u SW:%u\n",
+                  PIN_BTN_A, PIN_BTN_B, PIN_BTN_C, PIN_JOY_SW);
+
     _btnA = _btnB = _btnC = _joySw = { false, true, 0 };
 
     _ejeX = { 0, 0, 0.0f, 0, 0 };
