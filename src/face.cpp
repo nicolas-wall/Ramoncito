@@ -74,6 +74,7 @@ enum class BocaStyle : uint8_t {
     ARCO_SUAVE,      // arco ∪, sonrisa cerrada
     SONRISA_TORCIDA, // ∪ con un lado más alto que el otro
     BOCA_ABIERTA,    // óvalo grande relleno: el "aaah" de la emoción
+    BOCA_TRES,       // "3": dos panzas apiladas, una w acostada
     OVALO,           // óvalo relleno: sorpresa
     ONDA,            // "ω": dos arcos ∪ pegados
     SERPENTINA       // "~": línea ondulada horizontal
@@ -93,7 +94,7 @@ static const BocaStyle BOCA_TABLE[13] = {
     BocaStyle::SONRISA_TORCIDA, // GUINO
     BocaStyle::SONRISA_GRANDE,  // RISA
     BocaStyle::SERPENTINA,      // MAREADO
-    BocaStyle::BOCA_ABIERTA     // ILUSIONADO
+    BocaStyle::BOCA_TRES        // ILUSIONADO
 };
 
 // ----------------------------------------------------------------
@@ -1644,7 +1645,7 @@ void Face::drawBoca(U8G2 &u8)
 
     // Arco hacia arriba (∪): sonrisa cerrada, más discreta que la rellena.
     case BocaStyle::ARCO_SUAVE:
-        arco(cx, cy, rx(15.0f), ry(7.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy - 3, rx(11.0f), ry(5.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
 
@@ -1656,8 +1657,21 @@ void Face::drawBoca(U8G2 &u8)
               -3.0f, FACE_BOCA_GROSOR);
         break;
 
+    // La "3": dos medias elipses apiladas abriendo hacia la derecha. Es una
+    // w girada 90°, y no sale de ninguna primitiva sola — hay que apilar dos
+    // mitades y hacerlas coincidir en el punto del medio.
+    case BocaStyle::BOCA_TRES: {
+        uint8_t arx = rx(5.0f), ary = ry(4.0f + resp * 0.5f);
+        arco(cx - 3, cy - ary + 1, arx, ary, FACE_BOCA_GROSOR,
+             U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_LOWER_RIGHT);
+        arco(cx - 3, cy + ary - 1, arx, ary, FACE_BOCA_GROSOR,
+             U8G2_DRAW_UPPER_RIGHT | U8G2_DRAW_LOWER_RIGHT);
+        break;
+    }
+
     // El "aaah": óvalo grande y relleno, no una sonrisa. Late más fuerte
-    // que el resto porque es la cara de entusiasmo.
+    // que el resto porque es la cara de entusiasmo. Sin usuarios hoy, queda
+    // disponible por si alguna expresión la pide.
     case BocaStyle::BOCA_ABIERTA:
         u8.drawFilledEllipse(cx, cy + 1, rx(7.0f), ry(9.0f + resp * 1.8f),
                              U8G2_DRAW_ALL);
