@@ -106,6 +106,12 @@ static const uint8_t PIN_DIAG_N      = sizeof(PIN_DIAG);
 static bool    pinWatch = false;
 static uint8_t pinWatchPrev[8];
 
+// Vigilancia del acelerómetro: imprime el vector de gravedad filtrado.
+// Sirve para descubrir qué eje del MPU corresponde a cada inclinación en el
+// montaje real, en vez de deducirlo del datasheet y errarle.
+static bool     imuWatch = false;
+static uint32_t imuWatchProx = 0;
+
 // ----- Estado varios ------------------------------------------
 static uint32_t ultimoLog = 0, ultimoFrame = 0;
 static uint32_t framesEnVentana = 0, fpsActual = 0;
@@ -370,6 +376,9 @@ static void procesarComando(const char* cmd) {
         } else {
             Serial.println("[watch] OFF");
         }
+    } else if (cmd[0] == 'g') {
+        imuWatch = !imuWatch;
+        Serial.printf("[imu] vigilancia %s\n", imuWatch ? "ON - inclina el aparato" : "OFF");
     } else if (cmd[0] == 'w' || cmd[0] == 'x' || cmd[0] == 'a' || cmd[0] == 'd') {
         // Stub de la palanca mientras no esté el módulo físico: cada tecla
         // es un golpe que vuelve solo al centro (ver Input::setStubAxis).
@@ -468,6 +477,12 @@ void loop() {
 
     // Módulos de fondo
     imu.update(ahora);
+
+    if (imuWatch && (int32_t)(ahora - imuWatchProx) >= 0) {
+        imuWatchProx = ahora + 200;
+        Serial.printf("[grav] X:%+.3f Y:%+.3f Z:%+.3f\n",
+                      imu.gravX(), imu.gravY(), imu.gravZ());
+    }
     net.update(ahora);
     sound.update(ahora);
 
