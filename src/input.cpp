@@ -77,7 +77,7 @@ void Input::begin() {
     } else {
         // Sin palanca: centro nominal, y los ejes se alimentan del stub.
         _ejeX.centro = _ejeY.centro = JOY_ADC_MAX / 2;
-        Serial.println("[input] palanca AUSENTE — ejes emulados por serial (w/a/s/d)");
+        Serial.println("[input] palanca AUSENTE — ejes emulados por serial (w/x/a/d)");
     }
 }
 
