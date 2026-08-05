@@ -10,14 +10,35 @@
 #include "arcade.h"
 #include "config.h"
 #include "sound.h"
+#include "iconos.h"
 #include <math.h>
 
 Arcade arcade;
 
-// Ítems del menú de juegos. El orden define los índices de _sel.
-static const char* const ITEMS[ARCADE_ITEMS_N] = { "PONG", "SALIR" };
-static const uint8_t ITEM_PONG  = 0;
-static const uint8_t ITEM_SALIR = 1;
+// ============================================================
+//  Registro de juegos
+//
+//  Agregar un juego nuevo es una entrada más en esta tabla y un case en
+//  el switch de _activar(). El carrusel, el deslizamiento, los puntitos
+//  de posición y el ajuste del ancho salen solos del tamaño del array.
+//
+//  SALIR vive acá como una tarjeta más en vez de ser una opción aparte:
+//  así el carrusel es la única forma de navegar y no hay dos convenciones
+//  distintas conviviendo. (El botón A también sale, para el que ya lo sabe.)
+// ============================================================
+enum class JuegoId : uint8_t { PONG, SALIR };
+
+struct JuegoDef {
+    JuegoId        id;
+    const char*    nombre;
+    const uint8_t* icono;
+};
+
+static const JuegoDef JUEGOS[] = {
+    { JuegoId::PONG,  "PONG",  ICONO_PONG  },
+    { JuegoId::SALIR, "SALIR", ICONO_SALIR },
+};
+static const uint8_t JUEGOS_N = sizeof(JUEGOS) / sizeof(JUEGOS[0]);
 
 // ============================================================
 //  Ciclo de vida
@@ -30,12 +51,24 @@ void Arcade::begin() {
 }
 
 void Arcade::enter(uint32_t now) {
-    _estado = ArcadeState::MENU;
-    _salir  = false;
-    _sel    = ITEM_PONG;
+    _estado     = ArcadeState::MENU;
+    _salir      = false;
+    _sel        = 0;
+    _slideDesde = 0;   // sin animación al entrar: la primera tarjeta ya está
     _tocarActividad(now);
     sound.play(Melody::BIP);
     Serial.println("[arcade] entrando al menu de juegos");
+}
+
+// Mueve el carrusel una tarjeta y arranca el deslizamiento. La lista da la
+// vuelta en los extremos: con pocas tarjetas, chocarse contra un tope se
+// siente roto.
+void Arcade::_mover(int8_t dir, uint32_t now) {
+    _slidePrev  = _sel;
+    _sel        = (uint8_t)((_sel + JUEGOS_N + dir) % JUEGOS_N);
+    _slideDir   = dir;
+    _slideDesde = now;
+    sound.play(Melody::BIP);
 }
 
 void Arcade::_tocarActividad(uint32_t now) {
@@ -53,8 +86,12 @@ void Arcade::handleEvent(InputEvent ev, uint32_t now) {
     // falta recordar para no quedarse trabado en ningún lado.
     bool atras = (ev == InputEvent::BTN_A_PRESS);
     bool ok    = (ev == InputEvent::BTN_C_PRESS || ev == InputEvent::JOY_SW_PRESS);
-    bool arriba = (ev == InputEvent::JOY_UP);
-    bool abajo  = (ev == InputEvent::JOY_DOWN || ev == InputEvent::BTN_B_PRESS);
+    // El carrusel es horizontal, así que se navega con izquierda/derecha.
+    // El botón B avanza: es el único control de navegación disponible
+    // mientras la palanca no esté montada, y con la lista circular alcanza
+    // para llegar a cualquier tarjeta.
+    bool anterior = (ev == InputEvent::JOY_LEFT);
+    bool siguiente = (ev == InputEvent::JOY_RIGHT || ev == InputEvent::BTN_B_PRESS);
 
     switch (_estado) {
 
@@ -62,21 +99,22 @@ void Arcade::handleEvent(InputEvent ev, uint32_t now) {
             if (atras) {
                 _salir = true;
                 sound.play(Melody::BIP);
-            } else if (arriba) {
-                _sel = (uint8_t)((_sel + ARCADE_ITEMS_N - 1) % ARCADE_ITEMS_N);
-                sound.play(Melody::BIP);
-            } else if (abajo) {
-                _sel = (uint8_t)((_sel + 1) % ARCADE_ITEMS_N);
-                sound.play(Melody::BIP);
+            } else if (anterior) {
+                _mover(-1, now);
+            } else if (siguiente) {
+                _mover(+1, now);
             } else if (ok) {
-                if (_sel == ITEM_SALIR) {
-                    _salir = true;
-                    sound.play(Melody::BIP);
-                } else {
-                    _resetPartida(now);
-                    _estado = ArcadeState::JUGANDO;
-                    sound.play(Melody::DESPERTAR);
-                    Serial.println("[arcade] PONG — partida nueva");
+                switch (JUEGOS[_sel].id) {
+                    case JuegoId::SALIR:
+                        _salir = true;
+                        sound.play(Melody::BIP);
+                        break;
+                    case JuegoId::PONG:
+                        _resetPartida(now);
+                        _estado = ArcadeState::JUGANDO;
+                        sound.play(Melody::DESPERTAR);
+                        Serial.println("[arcade] PONG — partida nueva");
+                        break;
                 }
             }
             break;
@@ -272,6 +310,12 @@ void Arcade::update(uint32_t now) {
         _tocarActividad(now);   // jugando nunca se considera inactividad
         return;
     }
+    // Fin del deslizamiento del carrusel. Vive acá y no en render() para que
+    // la animación termine aunque algún frame no llegue a dibujarse.
+    if (_slideDesde != 0 && (now - _slideDesde) >= ARCADE_SLIDE_MS) {
+        _slideDesde = 0;
+    }
+
     // En menú, pausa y fin: si nadie toca nada, el arcade se cierra solo.
     if ((int32_t)(now - _timeout) >= 0) {
         _salir = true;
@@ -292,25 +336,59 @@ void Arcade::render(U8G2& u8) {
     }
 }
 
-void Arcade::_renderMenu(U8G2& u8) {
-    u8.setFont(u8g2_font_6x12_tf);
-    const char* titulo = "ARCADE";
-    u8.drawStr((128 - u8.getStrWidth(titulo)) / 2, 12, titulo);
-    u8.drawHLine(0, 16, 128);
+// Una tarjeta completa —ícono arriba, nombre abajo— desplazada dx píxeles.
+// El desplazamiento es lo que permite dibujar dos a la vez durante el
+// deslizamiento; con dx=0 queda centrada.
+void Arcade::_renderTarjeta(U8G2& u8, uint8_t idx, int16_t dx) {
+    // Si la tarjeta quedó del todo fuera de pantalla, no hay nada que hacer.
+    if (dx <= -128 || dx >= 128) return;
+
+    const JuegoDef& j = JUEGOS[idx];
+
+    u8.drawXBMP(dx + (128 - ICONO_W) / 2, 6, ICONO_W, ICONO_H, j.icono);
 
     u8.setFont(u8g2_font_7x13B_tf);
-    for (uint8_t i = 0; i < ARCADE_ITEMS_N; i++) {
-        int y = 34 + i * 16;
-        int x = 34;
-        if (i == _sel) {
-            // Resaltado en negativo: el ítem elegido se lee de un vistazo
-            // incluso con la pantalla lejos.
-            u8.drawBox(x - 6, y - 11, 128 - 2 * (x - 6), 14);
-            u8.setDrawColor(0);
-            u8.drawStr(x, y, ITEMS[i]);
-            u8.setDrawColor(1);
-        } else {
-            u8.drawStr(x, y, ITEMS[i]);
+    int16_t tw = u8.getStrWidth(j.nombre);
+    u8.drawStr(dx + (128 - tw) / 2, 52, j.nombre);
+}
+
+void Arcade::_renderMenu(U8G2& u8) {
+    // ── Tarjetas ─────────────────────────────────────────────
+    if (_slideDesde != 0) {
+        // El corte de la animación lo hace update(); acá solo se lee.
+        uint32_t t = millis() - _slideDesde;
+        float p = (float)t / (float)ARCADE_SLIDE_MS;
+        if (p > 1.0f) p = 1.0f;
+        // Smoothstep: arranca y frena suave. Con avance lineal el
+        // deslizamiento se ve mecánico, sobre todo al pasar varias
+        // tarjetas seguidas.
+        p = p * p * (3.0f - 2.0f * p);
+        int16_t desp = (int16_t)(128.0f * p);
+        // La que sale se va para el lado contrario al que entra la nueva.
+        _renderTarjeta(u8, _slidePrev, (int16_t)(-_slideDir * desp));
+        _renderTarjeta(u8, _sel,       (int16_t)(_slideDir * (128 - desp)));
+    } else {
+        _renderTarjeta(u8, _sel, 0);
+    }
+
+    // ── Marco fijo: flechas y puntitos ───────────────────────
+    // Se dibujan después de las tarjetas para que queden por encima
+    // mientras algo está deslizándose.
+    if (JUEGOS_N > 1) {
+        // Chevrones a los costados, a la altura del ícono. Van siempre los
+        // dos porque la lista es circular: nunca hay un extremo real.
+        for (uint8_t k = 0; k < 4; k++) {
+            u8.drawVLine(3 + k,   22 - k, 1 + 2 * k);   // ‹
+            u8.drawVLine(124 - k, 22 - k, 1 + 2 * k);   // ›
+        }
+
+        // Puntitos de posición, centrados abajo.
+        const int8_t paso = 7;
+        int16_t x0 = 64 - (JUEGOS_N * paso) / 2 + 1;
+        for (uint8_t i = 0; i < JUEGOS_N; i++) {
+            int16_t cx = x0 + i * paso;
+            if (i == _sel) u8.drawDisc(cx, 60, 2);
+            else           u8.drawPixel(cx, 60);
         }
     }
 }

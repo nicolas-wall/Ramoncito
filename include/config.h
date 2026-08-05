@@ -80,8 +80,10 @@ static const bool     JOY_INVERTIR_Y         = true;  // en el KY-023 el ADC de 
 static const uint32_t JOY_STUB_AUTOCENTRO_MS = 220;
 
 // ----- Arcade -------------------------------------------------
-// Entradas del menú de juegos. Hoy: Pong + Salir.
-static const uint8_t  ARCADE_ITEMS_N     = 2;
+// Duración del deslizamiento entre tarjetas del carrusel. Corto: es
+// confirmación de que te moviste, no una animación para mirar. Por encima
+// de ~250 ms el menú empieza a sentirse pesado al pasar varias seguidas.
+static const uint32_t ARCADE_SLIDE_MS    = 170;
 // Sin tocar nada durante este tiempo, el arcade se cierra solo y vuelve a la
 // cara. Es largo a propósito: en el menú de sistema 10 s está bien, pero acá
 // alguien puede quedarse pensando entre partidas.

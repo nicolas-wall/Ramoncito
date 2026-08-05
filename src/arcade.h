@@ -12,6 +12,10 @@
 //     │            └──A──► PAUSA ──A──► MENU                       │
 //     └──────────────────────────C (revancha) / A (menú) ◄─────────┘
 //
+//  El MENU es un carrusel horizontal: una tarjeta a pantalla completa por
+//  juego, con su ícono y su nombre. La palanca (o el botón B) pasa de una a
+//  otra con un deslizamiento, y la lista da la vuelta en los extremos.
+//
 //  El botón A es siempre "atrás": desde el menú sale al idle (la cara),
 //  desde el juego pausa, desde la pausa vuelve al menú. Nunca hay que
 //  adivinar cómo salir.
@@ -47,8 +51,17 @@ public:
 private:
     ArcadeState _estado   = ArcadeState::MENU;
     bool        _salir    = false;
-    uint8_t     _sel      = 0;   // ítem resaltado del menú
+    uint8_t     _sel      = 0;   // tarjeta visible del carrusel
     uint32_t    _timeout  = 0;   // millis límite de inactividad
+
+    // --- Animación del carrusel ---
+    // _slideDesde = 0 significa quieto. Durante el deslizamiento se dibujan
+    // las DOS tarjetas, la que sale y la que entra, desplazadas en x.
+    uint32_t _slideDesde = 0;
+    int8_t   _slideDir   = 0;   // +1 = entra desde la derecha, -1 = izquierda
+    uint8_t  _slidePrev  = 0;   // tarjeta que está saliendo
+
+    void _mover(int8_t dir, uint32_t now);
 
     // --- Estado de la partida de Pong ---
     struct Pong {
@@ -67,6 +80,7 @@ private:
     void _sacar(uint32_t now, bool haciaJug);
     void _updatePong(uint32_t now);
     void _renderMenu(U8G2& u8);
+    void _renderTarjeta(U8G2& u8, uint8_t idx, int16_t dx);
     void _renderPong(U8G2& u8);
     void _renderFin(U8G2& u8);
     void _renderPausa(U8G2& u8);
