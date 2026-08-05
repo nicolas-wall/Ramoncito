@@ -43,12 +43,15 @@
 #include "imu.h"
 #include "notify.h"
 #include "telegram.h"
+#include "arcade.h"
 
 // ----- Display -----------------------------------------------
 U8G2_SSD1309_128X64_NONAME0_F_HW_I2C u8g2(U8G2_R2, U8X8_PIN_NONE);  // R2 = 180° (montaje invertido)
 
 // ----- Máquina de estados global ------------------------------
-enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO, NOTIF };
+// ARCADE va al final para no correr los índices que ya aparecen en los logs
+// como "est:N" y en las capturas seriales viejas.
+enum class AppState : uint8_t { IDLE, REACTING, SLEEPING, MENU, STANDBY, NACIENDO, NOTIF, ARCADE };
 static AppState appState = AppState::IDLE;
 
 // ----- Notificaciones en pantalla -----------------------------
@@ -381,6 +384,12 @@ static void despacharEventos(uint32_t ahora) {
                 ajustesSel = 0;
                 menuHasta = ahora + MENU_TIMEOUT_MS;
                 sound.play(Melody::BIP);
+            } else if (evActiva(ev)) {
+                // El arcade se puede abrir a cualquier hora: es la función
+                // principal del aparato, no tiene sentido que el horario
+                // nocturno de la mascota la bloquee.
+                appState = AppState::ARCADE;
+                arcade.enter(ahora);
             } else {
                 personality.event(PersEvent::ENOJO_NOCTURNO);
                 face.setExpression(Expression::ENOJADO);
@@ -501,10 +510,34 @@ static void despacharEventos(uint32_t ahora) {
             continue;
         }
 
+        // ── ARCADE ───────────────────────────────────────────────
+        // Todos los controles pasan al módulo del arcade, que tiene su
+        // propia máquina de estados. Sale por su propia decisión (botón A
+        // en el menú, opción SALIR, o inactividad).
+        if (appState == AppState::ARCADE) {
+            arcade.handleEvent(ev, ahora);
+            if (arcade.quiereSalir()) {
+                appState = AppState::IDLE;
+                idleExprActual = mood.dominantExpression();
+                face.setExpression(idleExprActual);
+                marcarActividad(ahora);
+                entroADormirMs = ahora;
+                Serial.println("[app] arcade -> IDLE");
+            }
+            continue;
+        }
+
         // ── IDLE / REACTING ──────────────────────────────────────
-        // El botón A abre el menú. El resto de los controles todavía no
-        // tiene destino: van a ser la entrada al arcade (menú de juegos),
-        // que es el próximo paso.
+        // A abre el menú de sistema; C (o el pulsador de la palanca)
+        // entra al arcade. B queda como el "sin función" que bipea.
+        if (evActiva(ev)) {
+            marcarActividad(ahora);
+            randExprActiva = false;
+            appState = AppState::ARCADE;
+            arcade.enter(ahora);
+            continue;
+        }
+
         if (ev == InputEvent::BTN_A_PRESS) {
             marcarActividad(ahora);
             randExprActiva  = false;
@@ -674,6 +707,7 @@ void setup() {
     mood.begin();
     personality.begin();
     input.begin();
+    arcade.begin();
     face.begin();
     imu.begin();   // requiere Wire ya iniciado; falla silenciosamente si no hay MPU
     net.begin();
@@ -728,9 +762,11 @@ void loop() {
     imu.update(ahora);
     net.update(ahora);
 
-    // Auto-OTA: solo fuera del menú para no pisar su render con la pantalla
-    // de progreso. En IDLE o SLEEPING el chequeo bloqueante es aceptable.
-    if (appState != AppState::MENU) {
+    // Auto-OTA: solo fuera del menú y del arcade. El chequeo es bloqueante y
+    // pisaría el render con la pantalla de progreso; en medio de una partida
+    // eso es un frame congelado de varios segundos. En IDLE o SLEEPING no
+    // molesta a nadie.
+    if (appState != AppState::MENU && appState != AppState::ARCADE) {
         ota.update(ahora);
     }
 
@@ -881,9 +917,12 @@ void loop() {
     // ── Notificaciones en pantalla ──────────────────────────────
     // Si hay un aviso en cola y el estado lo permite, mostrarlo (enciende la
     // pantalla si estaba en standby). No interrumpe menú/nacimiento/reacción.
+    // El arcade también queda excluido: cortar una partida a la mitad con un
+    // aviso de Telegram sería la peor forma de perder un punto.
     if (notify.hayPendiente() &&
         appState != AppState::MENU && appState != AppState::NACIENDO &&
-        appState != AppState::REACTING && appState != AppState::NOTIF) {
+        appState != AppState::REACTING && appState != AppState::NOTIF &&
+        appState != AppState::ARCADE) {
         notifVolverA = appState;
         if (appState == AppState::STANDBY) u8g2.setPowerSave(0);  // encender pantalla
         notify.pop(notifActual);
@@ -928,6 +967,18 @@ void loop() {
     }
 
     despacharEventos(ahora);
+
+    // ── Arcade: física del juego y cierre por inactividad ───────
+    if (appState == AppState::ARCADE) {
+        arcade.update(ahora);
+        marcarActividad(ahora);   // jugando no se cuenta como estar inactivo
+        if (arcade.quiereSalir()) {
+            appState = AppState::IDLE;
+            idleExprActual = mood.dominantExpression();
+            face.setExpression(idleExprActual);
+            entroADormirMs = ahora;
+        }
+    }
 
     // (El toggle de sonido por long-press se retiró: ahora vive como
     //  opción de la página 4 · Ajustes.)
@@ -1274,6 +1325,8 @@ void loop() {
         // Página 4 · Ajustes
         md.ajustesSel  = ajustesSel;
         menuRender(u8g2, md, menuPagina);
+    } else if (appState == AppState::ARCADE) {
+        arcade.render(u8g2);
     } else if (appState == AppState::NOTIF) {
         notify.render(u8g2, notifActual, ahora, notifDesde);
     } else {

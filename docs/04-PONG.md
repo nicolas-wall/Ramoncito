@@ -1,27 +1,41 @@
-# Ramoncito — Documento 4: Minijuego Oculto — Pong
+# Ramoncito — Documento 4: Pong
+
+> ⚠ **Este documento describe el diseño original de 2026-07, cuando Pong era un
+> minijuego oculto de la mascota y se entraba con un combo secreto.** Con el
+> pivot a mini arcade (v0.10.0) Pong dejó de estar escondido: es la primera
+> entrada del menú de juegos. Lo implementado está en `src/arcade.cpp`; el
+> resto de este documento se conserva por las ideas de presentación y game
+> feel, pero **la sección de entrada de abajo ya no aplica**.
 
 ## Contexto
 
-Hardware: XIAO ESP32-S3 · OLED SSD1309 128×64 · U8g2 · botones A (GPIO) y B (GPIO) · buzzer pasivo · loop a 30 fps sin delays bloqueantes.
+Hardware: XIAO ESP32-S3 · OLED SSD1309 128×64 · U8g2 · tres botones + palanca analógica · buzzer pasivo · loop a 30 fps sin delays bloqueantes.
 
 ---
 
-## 1. Entrada secreta
+## 1. Entrada al juego (implementado en v0.10.0)
 
-### Detección del combo
+Desde la cara en reposo, el botón **C** (o el pulsador de la palanca) abre el **menú del arcade**. Ahí la palanca o el botón B mueven el cursor, y C confirma.
+
+```
+IDLE ──C──► MENU ──C──► JUGANDO ──(5 puntos)──► FIN
+              ▲            │                     │
+              │            └──A──► PAUSA ──A──►   │
+              └────────────── C revancha / A ─────┘
+```
+
+El botón **A es siempre "atrás"**: en el menú sale a la cara, en el juego pausa, en la pausa vuelve al menú. No hay combos que recordar.
+
+El menú se cierra solo tras `ARCADE_TIMEOUT_MS` (60 s) de inactividad, pero **jugando nunca se cierra**: una partida cuenta como actividad. El arcade también se puede abrir de noche, con la mascota dormida — es la función principal del aparato y el horario no la bloquea.
+
+### Diseño original descartado — combo secreto
 
 ```
 Estado: IDLE (cara activa, no en animación de reacción)
 Condición: botón A AND botón B mantenidos simultáneamente ≥ 3000 ms
-
-Implementación:
-  - comboStartMs = 0
-  - Si A y B están presionados y comboStartMs == 0: comboStartMs = millis()
-  - Si A o B se suelta: comboStartMs = 0
-  - Si millis() - comboStartMs >= 3000: disparar entrada a Pong
 ```
 
-Durante la cuenta regresiva (0–3 s) no hacer nada visible. El combo solo se activa si la cara está en estado IDLE; en DURMIENDO y REACCIÓN no se procesa.
+Se descartó junto con el pivot: en un arcade el juego no tiene por qué estar escondido, y con tres botones y una palanca hay lugar de sobra para un menú explícito.
 
 ### Animación de transición — entrada
 

@@ -83,6 +83,43 @@ static const bool     JOY_INVERTIR_Y         = true;  // en el KY-023 el ADC de 
 // antes de volver sola al centro.
 static const uint32_t JOY_STUB_AUTOCENTRO_MS = 220;
 
+// ----- Arcade -------------------------------------------------
+// Entradas del menú de juegos. Hoy: Pong + Salir.
+static const uint8_t  ARCADE_ITEMS_N     = 2;
+// Sin tocar nada durante este tiempo, el arcade se cierra solo y vuelve a la
+// cara. Es largo a propósito: en el menú de sistema 10 s está bien, pero acá
+// alguien puede quedarse pensando entre partidas.
+static const uint32_t ARCADE_TIMEOUT_MS  = 60000;
+
+// ----- Pong ---------------------------------------------------
+// Cancha: la franja de arriba queda para el marcador, el resto es el campo.
+static const uint8_t  PONG_TOP_Y         = 12;   // primera fila jugable
+static const uint8_t  PONG_BOT_Y         = 63;   // última fila jugable
+
+static const uint8_t  PONG_PALETA_W      = 2;
+static const uint8_t  PONG_PALETA_H      = 14;
+static const uint8_t  PONG_PALETA_X_JUG  = 3;    // paleta del jugador (izquierda)
+static const uint8_t  PONG_PALETA_X_CPU  = 123;  // paleta de la CPU (derecha)
+// Velocidad de la paleta del jugador a fondo de palanca (px por frame).
+static const float    PONG_PALETA_VEL    = 2.4f;
+// La CPU es deliberadamente más lenta que el jugador: es lo único que hace
+// que el juego se pueda ganar. Subir esto lo vuelve invencible.
+static const float    PONG_CPU_VEL       = 1.5f;
+// Tolerancia antes de que la CPU corrija: sin esto tiembla alrededor de la
+// pelota y se ve como un tic nervioso.
+static const float    PONG_CPU_ZONA_MUERTA = 3.0f;
+
+static const uint8_t  PONG_BOLA_LADO     = 3;    // cuadradito de 3x3
+static const float    PONG_BOLA_VEL_INI  = 1.5f; // px/frame al sacar
+static const float    PONG_BOLA_VEL_MAX  = 3.4f; // techo tras muchos rebotes
+static const float    PONG_BOLA_ACEL     = 0.12f;// se acelera en cada paletazo
+// Efecto: cuánto desvía el rebote según dónde pegue en la paleta. 0 = rebote
+// plano y aburrido; alto = imposible de controlar.
+static const float    PONG_BOLA_EFECTO   = 1.1f;
+
+static const uint8_t  PONG_PUNTOS_GANAR  = 5;
+static const uint32_t PONG_SAQUE_MS      = 900;  // pausa antes de cada saque
+
 // ----- Reacciones (duraciones en ms) --------------------------
 static const uint32_t REACCION_BTN_MS    = 1500;
 static const uint32_t REACCION_TOUCH_MS  = 2000;
