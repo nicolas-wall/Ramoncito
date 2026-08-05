@@ -77,6 +77,10 @@ static uint32_t    proximoRonquido = 0;
 // ----- Malhumor (§1.2) ----------------------------------------
 // Ya no lo disparan las cosquillas (el sensor de pie se retiró); ahora la
 // única fuente es sacudir el aparato de más (IMU).
+// Ya no cambia la cara: desde que el reposo es NEUTRAL, lo único que queda
+// mirando esta variable es la respuesta de Telegram a "estás enojado?", que
+// contesta que sí si lo sacudiste hace poco. La reacción visible a la
+// sacudida es la expresión momentánea (MAREADO/SORPRENDIDO), no este estado.
 static uint32_t malhumorHasta   = 0;  // 0 = sin malhumor; > 0 = timestamp de expiración
 
 // ----- Renacer: confirmación en página 4 ----------------------
@@ -134,6 +138,25 @@ static void scheduleSospechoso(uint32_t ahora) {
                     (uint32_t)(random((long)(SOSP_RAND_MAX_MS - SOSP_RAND_MIN_MS)));
 }
 
+// ------------------------------------------------------------
+// Cara de reposo del gabinete.
+//
+// Antes la elegía el humor: felicidad/energía/aburrimiento decidían entre
+// FELIZ, TRISTE, ENOJADO, ABURRIDO o DORMIDO. Eso funcionaba cuando había
+// caricias y cosquillas para alimentar esas variables; al pasar a arcade,
+// esos sensores se fueron y quedaron las salidas sin entradas. El único
+// resultado posible era una deriva lenta hacia la cara triste, sin manera
+// de revertirla — un tobogán de un solo sentido.
+//
+// Ahora el reposo es NEUTRAL y la vida de la carita sale de otro lado: los
+// gestos ocasionales durante el idle (guiño, mirada perdida, bostezo,
+// sacudida de cabeza) y las reacciones al movimiento del IMU. Reacciona,
+// pero no acumula un estado de ánimo que nadie puede cambiar.
+//
+// Si algún día se quiere volver a un reposo con humor, este es el único
+// lugar que hay que tocar.
+static inline Expression caraDeReposo() { return Expression::NEUTRAL; }
+
 // Registra cualquier interacción: actualiza ultimaActividad y
 // reinicia el contador del "qué pasa" (§1.4).
 static void marcarActividad(uint32_t ahora) {
@@ -177,7 +200,7 @@ static void entrarADormir(uint32_t ahora) {
 
 static void despertar(uint32_t ahora) {
     appState = AppState::IDLE;
-    idleExprActual = mood.dominantExpression();
+    idleExprActual = caraDeReposo();
     face.setExpression(idleExprActual);
     sound.play(Melody::DESPERTAR);
     marcarActividad(ahora);
@@ -263,7 +286,7 @@ static String responder(const char* q, Expression& rx) {
         if (e < 20) { rx = Expression::DORMIDO;  return "un poco cansado \xF0\x9F\xA5\xB1 (energia "+String(e)+")"; }
         if (a > 70) { rx = Expression::ABURRIDO; return "medio aburrido... juga conmigo! \xF0\x9F\xA5\xBA"; }
         if (f > 70) { rx = Expression::FELIZ;    return "de diez! \xF0\x9F\x98\x84 (felicidad "+String(f)+")"; }
-        rx = mood.dominantExpression();          return "ahi ando \xF0\x9F\x90\xB9 feliz "+String(f)+", energia "+String(e);
+        rx = caraDeReposo();          return "ahi ando \xF0\x9F\x90\xB9 feliz "+String(f)+", energia "+String(e);
     }
     if (tiene(n,"hambre")||tiene(n,"comer")||tiene(n,"comida")) {
         if (e < 40) { rx = Expression::ABURRIDO; return "si! me vendria bien recargar energia \xF0\x9F\x8D\xBD"; }
@@ -347,7 +370,7 @@ static void salirStandby(uint32_t ahora) {
     randExprActiva = false;
     // Siempre vuelve a IDLE para que el usuario pueda interactuar
     appState = AppState::IDLE;
-    idleExprActual = mood.dominantExpression();
+    idleExprActual = caraDeReposo();
     face.setExpression(idleExprActual);
     Serial.println("[app] standby — pantalla encendida (gracia 30 s)");
 }
@@ -433,7 +456,7 @@ static void despacharEventos(uint32_t ahora) {
                 } else {
                     // Última página: cerrar el menú
                     appState = AppState::IDLE;
-                    idleExprActual = mood.dominantExpression();
+                    idleExprActual = caraDeReposo();
                     face.setExpression(idleExprActual);
                     sound.play(Melody::BIP);
                     marcarActividad(ahora);
@@ -449,7 +472,7 @@ static void despacharEventos(uint32_t ahora) {
                         ota.instalarAhora();
                         // Si vuelve acá, la instalación falló: cerrar limpio
                         appState = AppState::IDLE;
-                        idleExprActual = mood.dominantExpression();
+                        idleExprActual = caraDeReposo();
                         face.setExpression(idleExprActual);
                         marcarActividad(ahora);
                         entroADormirMs = ahora;
@@ -479,7 +502,7 @@ static void despacharEventos(uint32_t ahora) {
                         } else {
                             // Cambiar WiFi: cerrar menú y abrir portal
                             appState = AppState::IDLE;
-                            idleExprActual = mood.dominantExpression();
+                            idleExprActual = caraDeReposo();
                             face.setExpression(idleExprActual);
                             marcarActividad(ahora);
                             entroADormirMs = ahora;
@@ -502,7 +525,7 @@ static void despacharEventos(uint32_t ahora) {
         // siguiente de la cola si queda alguno; si no, vuelve a la vida normal.
         if (appState == AppState::NOTIF) {
             appState = (notifVolverA == AppState::STANDBY) ? AppState::IDLE : notifVolverA;
-            idleExprActual = mood.dominantExpression();
+            idleExprActual = caraDeReposo();
             face.setExpression(idleExprActual);
             marcarActividad(ahora);
             entroADormirMs = ahora;
@@ -518,7 +541,7 @@ static void despacharEventos(uint32_t ahora) {
             arcade.handleEvent(ev, ahora);
             if (arcade.quiereSalir()) {
                 appState = AppState::IDLE;
-                idleExprActual = mood.dominantExpression();
+                idleExprActual = caraDeReposo();
                 face.setExpression(idleExprActual);
                 marcarActividad(ahora);
                 entroADormirMs = ahora;
@@ -596,7 +619,7 @@ static void procesarComando(const char* cmd) {
         // Alternar menú (equivale a apretar un botón)
         if (appState == AppState::MENU) {
             appState = AppState::IDLE;
-            face.setExpression(mood.dominantExpression());
+            face.setExpression(caraDeReposo());
         } else {
             appState  = AppState::MENU;
             menuPagina = 1;  // reiniciar en página 1
@@ -714,7 +737,7 @@ void setup() {
     ota.begin(&u8g2);
     telegram.begin();
 
-    idleExprActual = mood.dominantExpression();
+    idleExprActual = caraDeReposo();
     face.setExpression(idleExprActual);
     sound.play(Melody::BOOT);
 
@@ -934,7 +957,7 @@ void loop() {
     // Auto-cierre del aviso tras NOTIF_AUTO_MS (si no lo tocaron antes).
     if (appState == AppState::NOTIF && (ahora - notifDesde) >= NOTIF_AUTO_MS) {
         appState = (notifVolverA == AppState::STANDBY) ? AppState::IDLE : notifVolverA;
-        idleExprActual = mood.dominantExpression();
+        idleExprActual = caraDeReposo();
         face.setExpression(idleExprActual);
         marcarActividad(ahora);
         entroADormirMs = ahora;
@@ -974,7 +997,7 @@ void loop() {
         marcarActividad(ahora);   // jugando no se cuenta como estar inactivo
         if (arcade.quiereSalir()) {
             appState = AppState::IDLE;
-            idleExprActual = mood.dominantExpression();
+            idleExprActual = caraDeReposo();
             face.setExpression(idleExprActual);
             entroADormirMs = ahora;
         }
@@ -1093,7 +1116,7 @@ void loop() {
         appState = AppState::IDLE;
         menuPagina = 1;  // resetear paginación (Etapa C)
         renacerConfirmando = false;  // cancelar confirmación pendiente
-        idleExprActual = mood.dominantExpression();
+        idleExprActual = caraDeReposo();
         face.setExpression(idleExprActual);
         marcarActividad(ahora);
         entroADormirMs  = ahora;  // después del menú, 30 min antes de standby
@@ -1221,7 +1244,7 @@ void loop() {
                 entrarADormir(ahora);
             } else {
                 appState = AppState::IDLE;
-                idleExprActual = mood.dominantExpression();
+                idleExprActual = caraDeReposo();
                 face.setExpression(idleExprActual);
                 scheduleGuino(ahora);
                 scheduleSospechoso(ahora);
@@ -1258,12 +1281,14 @@ void loop() {
                     scheduleSospechoso(ahora + dur);
                 }
             } else {
-                // Actualizar expresión idle si el humor cambió (con override de malhumor §1.2)
-                bool enMalhumor = (malhumorHasta != 0) && ((int32_t)(ahora - malhumorHasta) < 0);
-                Expression dominante = enMalhumor ? Expression::ENOJADO : mood.dominantExpression();
-                if (dominante != idleExprActual) {
-                    idleExprActual = dominante;
-                    face.setExpression(dominante);
+                // Volver al reposo si quedó otra expresión colgada. Ya no hay
+                // override de malhumor: agitarlo da una reacción visible en el
+                // momento, pero no lo deja enojado durante un minuto — eso era
+                // un estado de ánimo persistente que el usuario no podía
+                // revertir de ninguna forma.
+                if (idleExprActual != caraDeReposo()) {
+                    idleExprActual = caraDeReposo();
+                    face.setExpression(idleExprActual);
                 }
             }
         }
