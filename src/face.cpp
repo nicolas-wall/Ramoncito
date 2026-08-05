@@ -97,9 +97,11 @@ static const BocaStyle BOCA_TABLE[13] = {
 // ----------------------------------------------------------------
 //  Posiciones fijas de los ojos (centro base)
 // ----------------------------------------------------------------
-static const float EYE_LEFT_CX  = 38.0f;
-static const float EYE_RIGHT_CX = 90.0f;
-static const float EYE_CY       = 35.0f;
+// Viven en config.h para poder moverlos sin entrar acá; la boca depende de
+// dónde queden, así que conviene tenerlos juntos.
+static const float EYE_LEFT_CX  = FACE_OJO_IZQ_CX;
+static const float EYE_RIGHT_CX = FACE_OJO_DER_CX;
+static const float EYE_CY       = FACE_OJO_CY;
 
 // ----------------------------------------------------------------
 //  Tabla de expresiones
@@ -1500,76 +1502,80 @@ void Face::drawBoca(U8G2 &u8)
         int r = (int)(v * escY + 0.5f);
         return (uint8_t)(r < 2 ? 2 : r);
     };
-    // Arco de grosor arbitrario: N circunferencias concéntricas. Con una
-    // sola el trazo se pierde al lado de los ojos, que son masas grandes.
-    auto arco = [&](int16_t ax, int16_t ay, uint8_t r, uint8_t grosor, uint8_t opt) {
-        for (uint8_t i = 0; i < grosor && r > i + 1; i++)
-            u8.drawCircle(ax, ay, (uint8_t)(r - i), opt);
+    // Arco elíptico de grosor arbitrario: N elipses concéntricas.
+    //
+    // Elipses y no circunferencias porque el radio horizontal y el vertical
+    // se controlan por separado: una boca ancha y poco profunda es una curva
+    // suave, y una angosta y profunda es una curva cerrada. Con círculos, lo
+    // ancho y lo curvo son el mismo número y no se puede tener una sin la
+    // otra. El grosor sale de apilar elipses: con una sola el trazo se
+    // pierde al lado de los ojos, que son masas grandes.
+    auto arco = [&](int16_t ax, int16_t ay, uint8_t arx, uint8_t ary,
+                    uint8_t grosor, uint8_t opt) {
+        for (uint8_t i = 0; i < grosor && arx > i + 1 && ary > i + 1; i++)
+            u8.drawEllipse(ax, ay, (uint8_t)(arx - i), (uint8_t)(ary - i), opt);
     };
 
     u8.setDrawColor(1);
 
     switch (st) {
 
+    // Neutro: una curva muy abierta, casi recta. No una barra: hasta el
+    // reposo se lee mejor con algo de curvatura que con un palito.
     case BocaStyle::LINEA:
     case BocaStyle::LINEA_LADEADA: {
-        // La barra se estira y se encoge un poco, y sube y baja un pelo.
-        int16_t w = (int16_t)((FACE_BOCA_ANCHO + resp * 2.0f) * esc);
-        if (w < 5) w = 5;
-        int16_t dy = (int16_t)(resp2 * 0.8f);
-        // La versión ladeada se corre a un costado: una boca fuera de eje es
-        // lo que hace que la cara se lea como escéptica y no como neutra.
-        int16_t x = cx - w / 2 + (st == BocaStyle::LINEA_LADEADA ? 5 : 0);
-        u8.drawBox(x, cy - 1 + dy, w, FACE_BOCA_GROSOR);
+        int16_t dx = (st == BocaStyle::LINEA_LADEADA ? 4 : 0);
+        arco(cx + dx, cy - 2, rx(9.0f), ry(3.0f + resp * 0.8f), FACE_BOCA_GROSOR,
+             U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
 
-    // Semidisco relleno con el lado plano arriba: es la boca abierta
-    // sonriente del estilo de referencia. El radio late con la respiración.
-    case BocaStyle::SONRISA: {
-        uint8_t r = rx(8.0f + resp * 1.2f);
-        u8.drawDisc(cx, cy - 3, r, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+    // Media elipse rellena con el lado plano arriba: la boca abierta
+    // sonriente del estilo de referencia. Ancha y honda para que se lea.
+    case BocaStyle::SONRISA:
+        u8.drawFilledEllipse(cx, cy - 2, rx(11.0f), ry(7.0f + resp * 1.2f),
+                             U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
-    }
 
     // La carcajada abre y cierra bastante más, y más rápido.
-    case BocaStyle::SONRISA_GRANDE: {
-        uint8_t r = rx(10.0f + resp2 * 2.2f);
-        u8.drawDisc(cx, cy - 4, r, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+    case BocaStyle::SONRISA_GRANDE:
+        u8.drawFilledEllipse(cx, cy - 3, rx(13.0f), ry(9.0f + resp2 * 2.2f),
+                             U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
-    }
 
     // Arco hacia abajo (∩): boca triste.
     case BocaStyle::ARCO_TRISTE:
-        arco(cx, cy + 4, rx(8.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy + 4, rx(10.0f), ry(6.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
         break;
 
     // El enojo lleva su propio arco, más ancho y más abierto que el triste:
     // con la misma boca, enojado y triste solo se distinguían por los ojos.
     case BocaStyle::ARCO_ENOJADO:
-        arco(cx, cy + 5, rx(11.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy + 5, rx(14.0f), ry(8.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_UPPER_LEFT | U8G2_DRAW_UPPER_RIGHT);
         break;
 
-    // Arco hacia arriba (∪): sonrisa cerrada, más discreta que el semidisco.
+    // Arco hacia arriba (∪): sonrisa cerrada, más discreta que la rellena.
     case BocaStyle::ARCO_SUAVE:
-        arco(cx, cy - 4, rx(8.0f), FACE_BOCA_GROSOR,
+        arco(cx, cy - 3, rx(11.0f), ry(6.0f), FACE_BOCA_GROSOR,
              U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
 
     // Óvalo que se estira en vertical: el "oh" de la sorpresa.
     case BocaStyle::OVALO:
-        u8.drawFilledEllipse(cx, cy, rx(4.0f), ry(5.0f + resp * 1.2f), U8G2_DRAW_ALL);
+        u8.drawFilledEllipse(cx, cy, rx(5.0f), ry(6.0f + resp * 1.2f), U8G2_DRAW_ALL);
         break;
 
     // Dos arcos ∪ pegados = "ω". Se balancean en contrafase, uno sube
     // mientras el otro baja, como una boca que masculla.
     case BocaStyle::ONDA: {
-        uint8_t r = rx(5.0f);
+        uint8_t arx = rx(6.0f), ary = ry(4.0f);
         int16_t d = (int16_t)(resp * 1.2f);
-        arco(cx - r, cy - 1 - d, r, 2, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
-        arco(cx + r, cy - 1 + d, r, 2, U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        arco(cx - arx, cy - 1 - d, arx, ary, 2,
+             U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
+        arco(cx + arx, cy - 1 + d, arx, ary, 2,
+             U8G2_DRAW_LOWER_LEFT | U8G2_DRAW_LOWER_RIGHT);
         break;
     }
 

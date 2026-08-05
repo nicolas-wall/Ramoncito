@@ -238,16 +238,26 @@ static const uint32_t QUEHACER_EXPR_DUR_MS = 4000;    // duración en modo "qué
 static const uint32_t INACTIVIDAD_QUEHACER_MS = 3UL  * 60UL * 1000UL;
 static const uint32_t INACTIVIDAD_STANDBY_MS  = 10UL * 60UL * 1000UL; // 10 min despierto → pantalla off
 
+// ----- Ojos: posición en pantalla -----------------------------
+// Separados a propósito: el hueco entre ellos es donde vive la boca. Con
+// los ojos juntos (38/90, como estaban) no quedaba lugar en el medio y la
+// boca tenía que irse abajo de todo, lejos de la cara.
+// El ojo más ancho de la tabla mide 30 px, así que a 30/98 los extremos
+// caen en x=15 y x=113: quedan 15 px de margen a cada lado.
+static const float    FACE_OJO_IZQ_CX = 30.0f;
+static const float    FACE_OJO_DER_CX = 98.0f;
+static const float    FACE_OJO_CY     = 35.0f;
+
 // ----- Boca ---------------------------------------------------
 // La cara arrancó siendo solo ojos. La boca se agregó después, en estilo
 // kawaii (pocas líneas, mucho contraste), y este flag permite compararla
 // contra la versión sin boca sin tener que revertir nada.
 static const bool     FACE_BOCA_HABILITADA = true;
-// Centro vertical de la boca. Los ojos ocupan hasta y=46 (cy=35, alto 22),
-// así que 54 la deja despegada sin que las formas grandes toquen el borde.
-static const float    FACE_BOCA_CY         = 54.0f;
-// Ancho y grosor de las bocas de barra (neutro y escéptico).
-static const float    FACE_BOCA_ANCHO      = 16.0f;
+// Centro vertical de la boca. Va en el hueco ENTRE los ojos, a la altura
+// de su parte baja — no debajo de ellos. Es lo que hace que se lea como una
+// cara y no como dos ojos con algo colgando abajo.
+static const float    FACE_BOCA_CY         = 44.0f;
+// Grosor del trazo de los arcos, en píxeles (elipses apiladas).
 static const uint8_t  FACE_BOCA_GROSOR     = 3;
 // Cuánto acompaña la boca al offset de mirada. En 1.0 se mueve igual que
 // los ojos y la cara entera parece girar; en 0 queda clavada al centro.
