@@ -25,6 +25,7 @@
 //    u         fuerza chequeo de auto-OTA inmediatamente
 //    n         alterna el menú
 //    e         pasa a la siguiente expresión (para revisar las caras)
+//    f         vuelca el framebuffer en hex (captura de pantalla real)
 //    o         fuerza el standby (para probar cómo despierta)
 //    g         vigilancia del acelerómetro on/off
 //    k         escáner de pines (foto de todos los pines libres)
@@ -97,6 +98,10 @@ static bool     randExprActiva = false;
 // ----- Inactividad y standby ----------------------------------
 static uint32_t ultimaActividad = 0;  // millis del último evento de interacción
 static uint32_t sigQuePasa      = 0;  // próximo disparo de cara SOSPECHOSO por inactividad
+// Apagado diferido: al cumplirse la inactividad no se apaga en el acto, sino
+// que se pone cara de DORMIDO y recién después se corta la pantalla. 0 = sin
+// apagado programado.
+static uint32_t standbyEnMs     = 0;
 
 // ----- Diagnóstico de pines (comandos 'k' y 'v') ---------------
 // Todos los pines del XIAO que no usan el OLED, el buzzer ni el LED.
@@ -162,6 +167,16 @@ static void reaccionar(Expression e, uint32_t duracionMs,
 }
 
 // ------------------------------------------------------------
+// Vuelta del arcade: la cara sale contenta. Se elige al azar entre las dos
+// caras alegres —no según cómo te fue en la partida— porque el usuario no
+// quiere que la cara comente el juego; solo que se note que estuvo jugando.
+static void salirDelArcade(uint32_t ahora) {
+    Expression e = (esp_random() % 2) ? Expression::RISA : Expression::FELIZ;
+    sound.play(Melody::FELIZ);
+    reaccionar(e, FACE_POSTJUEGO_MS, "", ahora);
+    Serial.println("[app] arcade -> cara contenta");
+}
+
 static void volverAlIdle(uint32_t ahora) {
     appState       = AppState::IDLE;
     idleExprActual = caraDeReposo();
@@ -240,10 +255,7 @@ static void despacharEventos(uint32_t ahora) {
         // propia máquina de estados y decide cuándo salir.
         if (appState == AppState::ARCADE) {
             arcade.handleEvent(ev, ahora);
-            if (arcade.quiereSalir()) {
-                volverAlIdle(ahora);
-                Serial.println("[app] arcade -> IDLE");
-            }
+            if (arcade.quiereSalir()) salirDelArcade(ahora);
             continue;
         }
 
@@ -386,6 +398,26 @@ static void procesarComando(const char* cmd) {
         } else {
             Serial.println("[watch] OFF");
         }
+    } else if (cmd[0] == 'f') {
+        // Vuelca el framebuffer del OLED en hexadecimal. Es una captura de
+        // pantalla real: lo que sale es exactamente lo que se está viendo,
+        // no una recreación en la PC que podría no coincidir.
+        //
+        // Formato del buffer (SSD13xx, full buffer): 8 páginas de 128 bytes;
+        // cada byte son 8 píxeles VERTICALES, el bit 0 arriba. O sea que
+        // pixel(x,y) = (buf[(y/8)*128 + x] >> (y%8)) & 1.
+        uint8_t* buf = u8g2.getBufferPtr();
+        const size_t n = (size_t)u8g2.getBufferTileWidth() * 8 *
+                         (size_t)u8g2.getBufferTileHeight();
+        Serial.printf("[fb] inicio %u\n", (unsigned)n);
+        char linea[72];
+        for (size_t i = 0; i < n; i += 32) {
+            int pos = 0;
+            for (size_t k = 0; k < 32 && (i + k) < n; k++)
+                pos += snprintf(linea + pos, sizeof(linea) - pos, "%02X", buf[i + k]);
+            Serial.println(linea);
+        }
+        Serial.println("[fb] fin");
     } else if (cmd[0] == 'e') {
         // Pasa por todas las expresiones, una por vez. Sin esto habría que
         // esperar a que salgan solas —algunas cada varios minutos— para ver
@@ -526,7 +558,7 @@ void loop() {
     if (appState == AppState::ARCADE) {
         arcade.update(ahora);
         marcarActividad(ahora);   // jugando no se cuenta como estar inactivo
-        if (arcade.quiereSalir()) volverAlIdle(ahora);
+        if (arcade.quiereSalir()) salirDelArcade(ahora);
     }
 
     // ── Eventos del IMU (acelerómetro) ──────────────────────────
@@ -567,10 +599,29 @@ void loop() {
         }
     }
 
-    // Standby por inactividad prolongada
-    if (appState == AppState::IDLE &&
+    // ── Apagado por inactividad, en dos tiempos ─────────────────
+    // Primero pone cara de dormido y recién después corta la pantalla. Que
+    // el OLED se apague de golpe parece un cuelgue; con el bostezo previo se
+    // entiende que se está yendo a dormir.
+    if (appState == AppState::IDLE && standbyEnMs == 0 &&
         (ahora - ultimaActividad) >= INACTIVIDAD_STANDBY_MS) {
-        entrarStandby();
+        idleExprActual = Expression::DORMIDO;
+        face.setExpression(idleExprActual);
+        randExprActiva = false;
+        standbyEnMs = ahora + FACE_DORMIDO_ANTES_MS;
+        Serial.println("[app] durmiendose...");
+    }
+    if (standbyEnMs != 0) {
+        // Si alguien lo toca en el medio, se cancela: marcarActividad ya
+        // reseteó el contador, así que basta con mirarlo.
+        if ((ahora - ultimaActividad) < INACTIVIDAD_STANDBY_MS) {
+            standbyEnMs = 0;
+            volverAlIdle(ahora);
+            Serial.println("[app] apagado cancelado");
+        } else if ((int32_t)(ahora - standbyEnMs) >= 0) {
+            standbyEnMs = 0;
+            entrarStandby();
+        }
     }
     if (appState == AppState::STANDBY) return;
 
@@ -663,7 +714,9 @@ void loop() {
     // ── Gestos ocasionales durante el idle ───────────────────────
     // Es de acá que sale la vida de la carita ahora que no hay humor:
     // guiños cada tanto y una mirada de "¿qué pasa?" si nadie la usa.
-    if (appState == AppState::IDLE) {
+    // Con un apagado programado la cara ya es DORMIDO: los gestos del idle
+    // la pisarían y volvería al reposo justo antes de apagarse.
+    if (appState == AppState::IDLE && standbyEnMs == 0) {
         if (randExprActiva) {
             if ((int32_t)(ahora - randExprHasta) >= 0) {
                 face.setExpression(idleExprActual);

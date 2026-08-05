@@ -248,6 +248,14 @@ static const float    FACE_OJO_IZQ_CX = 30.0f;
 static const float    FACE_OJO_DER_CX = 98.0f;
 static const float    FACE_OJO_CY     = 35.0f;
 
+// ----- Caras ligadas a eventos --------------------------------
+// Cuánto se muestra la cara DORMIDO antes de apagar la pantalla. Es un
+// aviso de que se va a dormir: sin esto el OLED se apaga de golpe y parece
+// que se colgó.
+static const uint32_t FACE_DORMIDO_ANTES_MS = 2200;
+// Duración de la cara contenta al volver de jugar.
+static const uint32_t FACE_POSTJUEGO_MS     = 2500;
+
 // ----- Boca ---------------------------------------------------
 // La cara arrancó siendo solo ojos. La boca se agregó después, en estilo
 // kawaii (pocas líneas, mucho contraste), y este flag permite compararla
