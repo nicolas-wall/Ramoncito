@@ -15,7 +15,9 @@
 //    Botón B (D8)  → mueve el cursor.
 //    Botón C (D2)  → activa; desde la cara, ENTRA AL ARCADE.
 //    Palanca       → arriba/abajo mueven el cursor; su pulsador activa.
-//    IMU           → alzarlo y sacudirlo dan reacciones faciales.
+//    IMU           → alzarlo: ILUSIONADO; sostenerlo en alto: AMOR.
+//                    sacudirlo: SORPRENDIDO → MAREADO → ENOJADO, según
+//                    cuánto se insista.
 //
 //  Comandos seriales:
 //    h N       fuerza la hora; h -1 libera
@@ -95,9 +97,19 @@ static uint32_t sigSospechoso  = 0;
 static uint32_t randExprHasta  = 0;
 static bool     randExprActiva = false;
 
+// ----- Alzado sostenido -> AMOR -------------------------------
+// Alzarlo es un impulso y da ILUSIONADO; sostenerlo en alto es otra cosa.
+// 0 = no está alzado; > 0 = millis en que empezó a estarlo.
+static uint32_t alzadoDesde  = 0;
+static bool     amorMostrado = false;
+
 // ----- Inactividad y standby ----------------------------------
 static uint32_t ultimaActividad = 0;  // millis del último evento de interacción
-static uint32_t sigQuePasa      = 0;  // próximo disparo de cara SOSPECHOSO por inactividad
+static uint32_t sigQuePasa      = 0;  // próximo disparo de cara por inactividad
+// Cuántas veces se disparó la cara de espera desde la última interacción.
+// La primera es SOSPECHOSO ("¿qué pasa?"); de ahí en más, ABURRIDO: es la
+// progresión de alguien esperando, y evita ver tres veces la misma cara.
+static uint8_t  quePasaCuenta   = 0;
 // Apagado diferido: al cumplirse la inactividad no se apaga en el acto, sino
 // que se pone cara de DORMIDO y recién después se corta la pantalla. 0 = sin
 // apagado programado.
@@ -141,6 +153,7 @@ static void scheduleSospechoso(uint32_t ahora) {
 static void marcarActividad(uint32_t ahora) {
     ultimaActividad = ahora;
     sigQuePasa      = ahora + INACTIVIDAD_QUEHACER_MS;
+    quePasaCuenta   = 0;
 }
 
 // ------------------------------------------------------------
@@ -171,6 +184,14 @@ static void reaccionar(Expression e, uint32_t duracionMs,
 // caras alegres —no según cómo te fue en la partida— porque el usuario no
 // quiere que la cara comente el juego; solo que se note que estuvo jugando.
 static void salirDelArcade(uint32_t ahora) {
+    if (!arcade.huboPartida()) {
+        // Abriste el arcade y te fuiste sin jugar. No es un comentario sobre
+        // cómo te fue —no hubo partida—: es sobre que lo dejaste ahí.
+        sound.play(Melody::TRISTE);
+        reaccionar(Expression::TRISTE, FACE_POSTJUEGO_MS, "", ahora);
+        Serial.println("[app] arcade -> no jugo nadie");
+        return;
+    }
     Expression e = (esp_random() % 2) ? Expression::RISA : Expression::FELIZ;
     sound.play(Melody::FELIZ);
     reaccionar(e, FACE_POSTJUEGO_MS, "", ahora);
@@ -578,6 +599,20 @@ void loop() {
             }
         }
 
+        // Sostenerlo en alto pasa de ilusión a cariño. El evento de alzado
+        // es de una sola vez; esto mira el estado sostenido del IMU.
+        if (imu.estaLevantado()) {
+            if (alzadoDesde == 0) { alzadoDesde = ahora; amorMostrado = false; }
+            else if (!amorMostrado && (ahora - alzadoDesde) >= FACE_AMOR_SOSTEN_MS) {
+                amorMostrado = true;
+                sound.play(Melody::AMOR);
+                reaccionar(Expression::AMOR, REACCION_TOUCH_MS, "", ahora);
+                Serial.println("[imu] sostenido en alto -> AMOR");
+            }
+        } else {
+            alzadoDesde = 0;
+        }
+
         if (imu.huboSacudida()) {
             marcarActividad(ahora);
             if (appState == AppState::STANDBY) {
@@ -734,9 +769,17 @@ void loop() {
                 randExprActiva = true;
                 uint32_t dur = quePasaDisparar ? QUEHACER_EXPR_DUR_MS : RAND_EXPR_DUR_MS;
                 randExprHasta = ahora + dur;
-                face.setExpression(Expression::SOSPECHOSO);
-                if (quePasaDisparar) sigQuePasa += INACTIVIDAD_QUEHACER_MS;
-                else                 scheduleSospechoso(ahora + dur);
+                Expression e = Expression::SOSPECHOSO;
+                if (quePasaDisparar) {
+                    quePasaCuenta++;
+                    // 3 min: "¿qué pasa?". 6 y 9 min: ya directamente aburrido.
+                    if (quePasaCuenta > 1) e = Expression::ABURRIDO;
+                    sigQuePasa += INACTIVIDAD_QUEHACER_MS;
+                } else {
+                    scheduleSospechoso(ahora + dur);
+                }
+                face.setExpression(e);
+                idleExprActual = caraDeReposo();
             } else if (idleExprActual != caraDeReposo()) {
                 idleExprActual = caraDeReposo();
                 face.setExpression(idleExprActual);

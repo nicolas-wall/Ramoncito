@@ -48,6 +48,10 @@ public:
 
     ArcadeState estado() const { return _estado; }
 
+    // true si desde que se entró al arcade se llegó a arrancar alguna
+    // partida. Lo usa main para distinguir "jugó" de "abrió y se fue".
+    bool huboPartida() const { return _huboPartida; }
+
 private:
     ArcadeState _estado  = ArcadeState::MENU;
     bool        _salir   = false;
@@ -55,6 +59,7 @@ private:
     uint32_t    _timeout = 0;   // millis límite de inactividad
 
     Juego*   _juego = nullptr;  // juego en curso (nullptr fuera de partida)
+    bool     _huboPartida = false;
     bool     _nuevoRecord = false;
 
     // Caché de récords, cargada de NVS una vez en begin(). El carrusel los

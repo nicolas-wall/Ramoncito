@@ -255,6 +255,9 @@ static const float    FACE_OJO_CY     = 35.0f;
 static const uint32_t FACE_DORMIDO_ANTES_MS = 2200;
 // Duración de la cara contenta al volver de jugar.
 static const uint32_t FACE_POSTJUEGO_MS     = 2500;
+// Cuánto hay que sostenerlo en alto para que pase de ILUSIONADO a AMOR.
+// Alzarlo es un impulso; sostenerlo es otra intención.
+static const uint32_t FACE_AMOR_SOSTEN_MS   = 2500;
 
 // ----- Guiño --------------------------------------------------
 // El guiño es un gesto con duración, no una pose: el ojo derecho baja el
@@ -502,7 +505,10 @@ static const uint32_t IMU_SACUDIDA_VENTANA_MS  = 1500;   // ms
 
 // Umbral de sacudidas acumuladas en la ventana para disparar enojo en vez de sorpresa.
 // 1–(MAX-1) sacudidas → SORPRENDIDO; MAX o más → ENOJADO.
-static const uint8_t  IMU_SACUDIDA_MAX         = 3;      // golpes: ≥ 3 → enojo
+static const uint8_t  IMU_SACUDIDA_MAX         = 3;      // golpes: ≥ 3 → mareo
+// Y si siguen sacudiendo después del mareo, se enoja. Es la escala completa:
+// sorpresa, mareo, enojo — cada una necesita más insistencia que la anterior.
+static const uint8_t  IMU_SACUDIDA_ENOJO       = 6;
 
 // ── Levantado por orientación sostenida ───────────────────────
 // La detección ya no usa banda de magnitud sino comparación de ángulo

@@ -71,6 +71,7 @@ void Arcade::enter(uint32_t now) {
     _sel        = 0;
     _slideDesde = 0;   // sin animación al entrar: la primera tarjeta ya está
     _juego      = nullptr;
+    _huboPartida = false;
     _tocarActividad(now);
     sound.play(Melody::BIP);
     Serial.println("[arcade] menu de juegos");
@@ -133,6 +134,7 @@ void Arcade::_activar(uint32_t now) {
         return;
     }
     _juego = j;
+    _huboPartida = true;
     _juego->begin(now);
     _nuevoRecord = false;
     _estado = ArcadeState::JUGANDO;

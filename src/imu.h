@@ -45,6 +45,12 @@ public:
     // Número de sacudidas detectadas en la ventana actual
     uint8_t sacudidasEnVentana() const { return _sacudidasEnVentana; }
 
+    // true mientras la orientación siga desviada del reposo, o sea mientras
+    // lo tengan alzado. A diferencia de huboLevantado(), que es un evento de
+    // una sola vez, esto es estado sostenido: sirve para distinguir el
+    // impulso de agarrarlo de sostenerlo un rato en la mano.
+    bool estaLevantado() const { return _enZonaLevantado; }
+
     // ── Vector de gravedad filtrado, en g ────────────────────────
     // Es la orientación suavizada del gabinete, la misma que usa la
     // detección de "levantado". La expone para el juego de laberinto, que
