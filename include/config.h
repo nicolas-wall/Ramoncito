@@ -247,6 +247,13 @@ static const uint32_t INACTIVIDAD_STANDBY_MS  = 10UL * 60UL * 1000UL; // 10 min 
 static const float    FACE_OJO_IZQ_CX = 30.0f;
 static const float    FACE_OJO_DER_CX = 98.0f;
 static const float    FACE_OJO_CY     = 35.0f;
+// Estiramiento global de los ojos, en píxeles, sumado al alto y al ancho
+// que trae cada expresión en su tabla. Es una perilla única para todas: la
+// tabla define la FORMA de cada expresión (medialuna, triángulo, espiral),
+// y esto define cuán grandes son en general, sin tener que retocar 13
+// entradas cada vez que se quiere probar otra proporción.
+static const float    FACE_OJO_ALTO_EXTRA  = 6.0f;
+static const float    FACE_OJO_ANCHO_EXTRA = 0.0f;
 
 // ----- Caras ligadas a eventos --------------------------------
 // Cuánto se muestra la cara DORMIDO antes de apagar la pantalla. Es un
@@ -271,6 +278,9 @@ static const uint32_t GUINO_CICLO_MS    = 1400;  // incluye la pausa entre guiñ
 // La subida imita lo que hace la mejilla al cerrarse; de más queda torcido.
 static const float    GUINO_PARPADO_PX  = 18.0f;
 static const float    GUINO_SUBE_PX     = 4.0f;
+// Cuánto sube la comisura de ESE lado. Sube y baja junto con el párpado,
+// no queda torcida: los tres movimientos son un solo gesto.
+static const float    GUINO_BOCA_PX     = 4.0f;
 
 // ----- Boca ---------------------------------------------------
 // La cara arrancó siendo solo ojos. La boca se agregó después, en estilo

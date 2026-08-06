@@ -267,8 +267,8 @@ static void exprToTargets(Expression e,
 
     lt.cx       = EYE_LEFT_CX;
     lt.cy       = EYE_CY + EXPR_OJO_DY[idx].izq;
-    lt.w        = d.w;
-    lt.h        = d.h;
+    lt.w        = d.w + FACE_OJO_ANCHO_EXTRA;
+    lt.h        = d.h + FACE_OJO_ALTO_EXTRA;
     lt.r        = d.r;
     lt.pTop     = d.lPTop;
     lt.pBot     = d.lPBot;
@@ -279,8 +279,8 @@ static void exprToTargets(Expression e,
 
     rt.cx       = EYE_RIGHT_CX;
     rt.cy       = EYE_CY + EXPR_OJO_DY[idx].der;
-    rt.w        = d.w;
-    rt.h        = d.h;
+    rt.w        = d.w + FACE_OJO_ANCHO_EXTRA;
+    rt.h        = d.h + FACE_OJO_ALTO_EXTRA;
     rt.r        = d.r;
     rt.pTop     = d.rPTop;
     rt.pBot     = d.rPBot;
@@ -1650,11 +1650,15 @@ void Face::drawBoca(U8G2 &u8)
         break;
 
     // Sonrisa con el lado derecho levantado, que es el del ojo que guiña.
-    // Es el gesto humano: se guiña y se tira de la comisura de ESE lado.
-    // Poco, apenas 3 px: de más se vuelve mueca.
+    //
+    // La inclinación va multiplicada por _guinoW, el mismo progreso que
+    // maneja el párpado: la comisura sube MIENTRAS el ojo se cierra y baja
+    // cuando se abre. Con una inclinación fija la boca quedaba torcida todo
+    // el tiempo y el guiño no se leía como un solo gesto, sino como una
+    // mueca permanente con un ojo parpadeando encima.
     case BocaStyle::SONRISA_TORCIDA:
         curva(cx, cy - 1, (int16_t)(12.0f * esc), 4.5f + resp * 0.6f,
-              -3.0f, FACE_BOCA_GROSOR);
+              -GUINO_BOCA_PX * _guinoW, FACE_BOCA_GROSOR);
         break;
 
     // La "3": dos medias elipses apiladas abriendo hacia la derecha. Es una

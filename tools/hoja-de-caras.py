@@ -23,19 +23,23 @@ ORDEN = ["FELIZ", "TRISTE", "ENOJADO", "SORPRENDIDO", "ABURRIDO", "DORMIDO",
          "SOSPECHOSO", "AMOR", "GUINO", "RISA", "MAREADO", "ILUSIONADO",
          "NEUTRAL"]
 
-# Solo las que el firmware llega a mostrar, con su disparador. Las otras
-# cuatro existen pero no las dispara nada; incluirlas confundiría en un
-# documento que sirve para decidir qué ajustar.
+# Las 13, con lo que dispara cada una. Desde que las cuatro huérfanas
+# (triste, enojado, aburrido, amor) se engancharon a escalas de cosas que
+# ya pasaban, no queda ninguna sin causa.
 USADAS = [
     ("NEUTRAL",     "cara de reposo"),
-    ("GUINO",       "guino, cada 15-45 s"),
-    ("SOSPECHOSO",  "al azar 1-2.5 min, y cada 3 min sin uso"),
+    ("GUINO",       "cada 15-45 s; el ojo cierra y abre"),
+    ("SOSPECHOSO",  "al azar 1-2.5 min, y a los 3 min sin uso"),
+    ("ABURRIDO",    "a los 6 y 9 min sin uso"),
+    ("DORMIDO",     "2.2 s antes de apagar la pantalla"),
     ("FELIZ",       "al volver de jugar (o RISA)"),
     ("RISA",        "al volver de jugar (o FELIZ)"),
-    ("DORMIDO",     "2.2 s antes de apagar la pantalla"),
+    ("TRISTE",      "si entras al arcade y salis sin jugar"),
     ("ILUSIONADO",  "al alzarlo (IMU)"),
+    ("AMOR",        "al sostenerlo en alto 2.5 s (IMU)"),
     ("SORPRENDIDO", "sacudida leve (IMU) + portal WiFi"),
     ("MAREADO",     "sacudirlo de mas (IMU)"),
+    ("ENOJADO",     "si seguis sacudiendo tras el mareo (IMU)"),
 ]
 
 
@@ -89,7 +93,7 @@ def main():
     hoja = Image.new("RGB", (AW, AH), (24, 24, 28))
     d = ImageDraw.Draw(hoja)
     f_tit, f_lbl, f_sub = fuente(24), fuente(18), fuente(14)
-    d.text((MARG, MARG), "Las 9 caras que el arcade realmente usa",
+    d.text((MARG, MARG), "Las 13 caras y que dispara cada una",
            font=f_tit, fill=(235, 235, 240))
 
     for i, (nombre, cuando) in enumerate(USADAS):
