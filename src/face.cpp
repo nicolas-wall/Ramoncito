@@ -265,11 +265,23 @@ static void exprToTargets(Expression e,
     if (idx >= 13) idx = 0;
     const ExprDef &d = EXPR_TABLE[idx];
 
+    // Tamaño y redondeo, con los ajustes globales aplicados una sola vez
+    // para los dos ojos. El radio se topea a la mitad del lado más corto:
+    // más que eso no entra en el rectángulo y el dibujo se deforma.
+    float w = d.w + FACE_OJO_ANCHO_EXTRA;
+    float h = d.h + FACE_OJO_ALTO_EXTRA;
+    if (w < 4.0f) w = 4.0f;
+    if (h < 2.0f) h = 2.0f;
+    float r = d.r + FACE_OJO_RADIO_EXTRA;
+    float rMax = ((w < h) ? w : h) * 0.5f;
+    if (r > rMax) r = rMax;
+    if (r < 0.0f) r = 0.0f;
+
     lt.cx       = EYE_LEFT_CX;
     lt.cy       = EYE_CY + EXPR_OJO_DY[idx].izq;
-    lt.w        = d.w + FACE_OJO_ANCHO_EXTRA;
-    lt.h        = d.h + FACE_OJO_ALTO_EXTRA;
-    lt.r        = d.r;
+    lt.w        = w;
+    lt.h        = h;
+    lt.r        = r;
     lt.pTop     = d.lPTop;
     lt.pBot     = d.lPBot;
     lt.slopeTop = d.lSlopeTop;
@@ -279,9 +291,9 @@ static void exprToTargets(Expression e,
 
     rt.cx       = EYE_RIGHT_CX;
     rt.cy       = EYE_CY + EXPR_OJO_DY[idx].der;
-    rt.w        = d.w + FACE_OJO_ANCHO_EXTRA;
-    rt.h        = d.h + FACE_OJO_ALTO_EXTRA;
-    rt.r        = d.r;
+    rt.w        = w;
+    rt.h        = h;
+    rt.r        = r;
     rt.pTop     = d.rPTop;
     rt.pBot     = d.rPBot;
     rt.slopeTop = d.rSlopeTop;

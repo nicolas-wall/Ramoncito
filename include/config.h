@@ -253,7 +253,12 @@ static const float    FACE_OJO_CY     = 35.0f;
 // y esto define cuán grandes son en general, sin tener que retocar 13
 // entradas cada vez que se quiere probar otra proporción.
 static const float    FACE_OJO_ALTO_EXTRA  = 6.0f;
-static const float    FACE_OJO_ANCHO_EXTRA = 0.0f;
+static const float    FACE_OJO_ANCHO_EXTRA = -4.0f;
+// Redondeo extra de las esquinas. Se topea a la mitad del lado más corto:
+// por encima de eso el radio no entra en el rectángulo y u8g2 dibuja
+// cualquier cosa. El tope lo aplica exprToTargets, no hace falta cuidarlo
+// al elegir el número.
+static const float    FACE_OJO_RADIO_EXTRA = 4.0f;
 
 // ----- Caras ligadas a eventos --------------------------------
 // Cuánto se muestra la cara DORMIDO antes de apagar la pantalla. Es un
